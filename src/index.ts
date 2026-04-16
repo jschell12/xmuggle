@@ -10,34 +10,40 @@ import { createTaskId, writeTask, type TaskPayload } from "./queue.js";
 import { sendTask, pollForResult } from "./remote.js";
 import {
   findLatestImage,
+  findAllUnprocessed,
   findImageByName,
+  autoIngestScreenshots,
   ingestFromScanDirs,
   markProcessed,
   listUnprocessed,
   listAllImages,
 } from "./images.js";
 
-const USAGE = `Usage: screenshot-agent --repo <repo> [--img <name>]... [--msg "context"] [--remote] [--list] [--scan]
+const USAGE = `Usage: screenshot-agent --repo <repo> [--img <name>]... [--all] [--msg "context"] [--remote] [--list] [--scan]
 
   --repo <repo>  GitHub repo (owner/name or URL) or local path
   --img  <name>  Select image(s) by name or partial match (repeatable)
-                 If omitted, uses the latest unprocessed image
+  --all          Process ALL unprocessed images (not just the latest)
   --msg  <msg>   Optional context to guide the agent
   --remote       Send to remote machine for processing (requires 'make setup')
   --list         List all images in ~/.screenshot-agent/ and their status
-  --scan         Scan ~/Desktop and ~/Downloads, move images to ~/.screenshot-agent/
+  --scan         Scan ~/Desktop and ~/Downloads for ALL images (not just screenshots)
 
-Image store:
-  Images live in ~/.screenshot-agent/. Processed images tracked in .tracked.
-  Use --scan to ingest from Desktop/Downloads, or copy images there manually.
+Image detection:
+  New screenshots are auto-detected from ~/Desktop and ~/Downloads via
+  macOS Spotlight (kMDItemIsScreenCapture) and copied into ~/.screenshot-agent/.
+  No manual step needed — just take a screenshot and run the command.
+
+  --scan is only needed to ingest non-screenshot images (downloads, etc).
 
 Examples:
-  screenshot-agent --scan                                         # ingest from Desktop/Downloads
-  screenshot-agent --list                                         # see all images + status
-  screenshot-agent --repo jschell12/my-app                        # latest unprocessed image
+  screenshot-agent --repo jschell12/my-app                        # latest new screenshot
+  screenshot-agent --repo jschell12/my-app --all                  # all new screenshots
   screenshot-agent --repo jschell12/my-app --msg "fix the btn"    # with context
   screenshot-agent --repo jschell12/my-app --img "Screenshot 2026-04-14"  # specific image
-  screenshot-agent --repo jschell12/my-app --img bug1.png --img bug2.png  # multiple images`;
+  screenshot-agent --repo jschell12/my-app --img bug1 --img bug2  # multiple images
+  screenshot-agent --scan                                         # ingest ALL images
+  screenshot-agent --list                                         # see all images + status`;
 
 function parseArgs(argv: string[]) {
   const args = argv.slice(2);
@@ -52,6 +58,7 @@ function parseArgs(argv: string[]) {
   let remote = false;
   let list = false;
   let scan = false;
+  let all = false;
   const imgs: string[] = [];
 
   for (let i = 0; i < args.length; i++) {
@@ -68,10 +75,12 @@ function parseArgs(argv: string[]) {
       list = true;
     } else if (arg === "--scan") {
       scan = true;
+    } else if (arg === "--all") {
+      all = true;
     }
   }
 
-  return { repo, message, remote, list, scan, imgs };
+  return { repo, message, remote, list, scan, all, imgs };
 }
 
 /** Resolve --img arguments to absolute paths in the image store */
@@ -163,21 +172,24 @@ async function runRemote(
 }
 
 async function main() {
-  const { repo, message, remote, list, scan, imgs } = parseArgs(process.argv);
+  const { repo, message, remote, list, scan, all, imgs } = parseArgs(process.argv);
 
-  // --scan: ingest images from Desktop/Downloads into ~/.screenshot-agent/
+  // --scan: ingest ALL images from Desktop/Downloads
   if (scan) {
     const count = ingestFromScanDirs();
     console.log(`Ingested ${count} image(s) into ~/.screenshot-agent/`);
     if (!repo) process.exit(0);
   }
 
-  // --list: show all images and their status
+  // --list: show all images and their status (auto-ingest screenshots first)
   if (list) {
+    const ingested = autoIngestScreenshots();
+    if (ingested > 0) console.log(`Auto-ingested ${ingested} new screenshot(s)\n`);
+
     const images = listAllImages();
     if (images.length === 0) {
       console.log("No images in ~/.screenshot-agent/");
-      console.log("Run --scan to ingest from ~/Desktop and ~/Downloads.");
+      console.log("Take a screenshot, or run --scan to ingest all images from Desktop/Downloads.");
     } else {
       const unprocessed = images.filter((i) => !i.isProcessed).length;
       console.log(`${images.length} image(s) in ~/.screenshot-agent/ (${unprocessed} unprocessed):\n`);
@@ -195,18 +207,28 @@ async function main() {
     process.exit(1);
   }
 
-  // Resolve images
+  // Resolve images (auto-ingest happens inside find* functions)
   let screenshotPaths: string[];
 
   if (imgs.length > 0) {
     // Specific images requested
     screenshotPaths = resolveImages(imgs);
+  } else if (all) {
+    // All unprocessed images
+    const unprocessed = findAllUnprocessed();
+    if (unprocessed.length === 0) {
+      console.error("No unprocessed images in ~/.screenshot-agent/");
+      console.error("Take a screenshot, or run --scan to ingest from Desktop/Downloads.");
+      process.exit(1);
+    }
+    screenshotPaths = unprocessed.map((img) => img.path);
+    console.log(`Found ${screenshotPaths.length} unprocessed image(s)`);
   } else {
-    // Auto-discover latest unprocessed
+    // Latest unprocessed
     const found = findLatestImage();
     if (!found) {
       console.error("No unprocessed images in ~/.screenshot-agent/");
-      console.error("Run: screenshot-agent --scan   to ingest from Desktop/Downloads");
+      console.error("Take a screenshot, or run --scan to ingest from Desktop/Downloads.");
       process.exit(1);
     }
     screenshotPaths = [found.path];

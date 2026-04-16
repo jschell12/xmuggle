@@ -1,56 +1,71 @@
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
-  renameSync,
   statSync,
   writeFileSync,
   appendFileSync,
 } from "node:fs";
+import { execSync } from "node:child_process";
 import { homedir } from "node:os";
 import { basename, extname, join } from "node:path";
 
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"]);
 
-/** Central image store — images are moved here from Desktop/Downloads */
+/** Central image store */
 const IMAGE_DIR = join(homedir(), ".screenshot-agent");
 const TRACKED_FILE = join(IMAGE_DIR, ".tracked");
+const SEEN_FILE = join(IMAGE_DIR, ".seen");
 
 function isImage(filename: string): boolean {
   return IMAGE_EXTS.has(extname(filename).toLowerCase());
 }
 
-/** Ensure ~/.screenshot-agent/ and .tracked exist */
 function ensureImageDir(): void {
   mkdirSync(IMAGE_DIR, { recursive: true });
   if (!existsSync(TRACKED_FILE)) {
-    writeFileSync(
-      TRACKED_FILE,
-      "# Tracked processed images — one filename per line\n"
-    );
+    writeFileSync(TRACKED_FILE, "# Processed images — one filename per line\n");
+  }
+  if (!existsSync(SEEN_FILE)) {
+    writeFileSync(SEEN_FILE, "# Seen source paths — prevents re-ingesting\n");
   }
 }
 
-/** Get the set of already-processed filenames (basenames in ~/.screenshot-agent/) */
+/** Filenames already marked as processed */
 function loadTracked(): Set<string> {
   ensureImageDir();
-  const lines = readFileSync(TRACKED_FILE, "utf-8").split("\n");
   const set = new Set<string>();
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (trimmed && !trimmed.startsWith("#")) set.add(trimmed);
+  for (const line of readFileSync(TRACKED_FILE, "utf-8").split("\n")) {
+    const t = line.trim();
+    if (t && !t.startsWith("#")) set.add(t);
   }
   return set;
 }
 
-/** Mark an image as processed by filename */
+/** Source paths already ingested (so we don't copy the same file twice) */
+function loadSeen(): Set<string> {
+  ensureImageDir();
+  const set = new Set<string>();
+  for (const line of readFileSync(SEEN_FILE, "utf-8").split("\n")) {
+    const t = line.trim();
+    if (t && !t.startsWith("#")) set.add(t);
+  }
+  return set;
+}
+
+function markSeen(srcPath: string): void {
+  ensureImageDir();
+  appendFileSync(SEEN_FILE, srcPath + "\n");
+}
+
 export function markProcessed(absPath: string): void {
   ensureImageDir();
   appendFileSync(TRACKED_FILE, basename(absPath) + "\n");
 }
 
-/** List images in a directory, sorted by mtime descending (newest first) */
+/** List images in a directory, sorted by mtime descending */
 function listImages(dir: string): { path: string; name: string; mtime: number }[] {
   if (!existsSync(dir)) return [];
   const entries = readdirSync(dir, { withFileTypes: true });
@@ -69,15 +84,14 @@ function listImages(dir: string): { path: string; name: string; mtime: number }[
 }
 
 /**
- * Move an image from Desktop/Downloads into ~/.screenshot-agent/.
- * Returns the new path. If a file with the same name exists, dedup with timestamp.
+ * Copy an image into ~/.screenshot-agent/ (copy, not move — leave originals).
+ * Returns the new path. Deduplicates by name.
  */
 function ingestImage(srcPath: string): string {
   ensureImageDir();
   let destName = basename(srcPath);
   let destPath = join(IMAGE_DIR, destName);
 
-  // Dedup if name collision
   if (existsSync(destPath)) {
     const ext = extname(destName);
     const stem = destName.slice(0, -ext.length);
@@ -85,28 +99,88 @@ function ingestImage(srcPath: string): string {
     destPath = join(IMAGE_DIR, destName);
   }
 
-  renameSync(srcPath, destPath);
+  copyFileSync(srcPath, destPath);
+  markSeen(srcPath);
   return destPath;
 }
 
 /**
- * Scan ~/Desktop and ~/Downloads for new images.
- * Move any found into ~/.screenshot-agent/.
- * Returns the count of newly ingested images.
+ * Use macOS Spotlight to find screenshots that haven't been ingested yet.
+ * Uses kMDItemIsScreenCapture metadata — only finds actual screenshots,
+ * not arbitrary images.
+ *
+ * Falls back to filename pattern matching on non-macOS or if mdfind fails.
+ */
+function findNewScreenshots(): string[] {
+  const seen = loadSeen();
+  let candidates: string[] = [];
+
+  try {
+    const output = execSync(
+      `mdfind 'kMDItemIsScreenCapture = 1' -onlyin "${homedir()}/Desktop" -onlyin "${homedir()}/Downloads"`,
+      { encoding: "utf-8", timeout: 10_000 }
+    );
+    candidates = output.trim().split("\n").filter(Boolean);
+  } catch {
+    // Fallback: scan Desktop/Downloads for Screenshot*.png pattern
+    const home = homedir();
+    for (const dir of [join(home, "Desktop"), join(home, "Downloads")]) {
+      for (const img of listImages(dir)) {
+        if (img.name.startsWith("Screenshot")) {
+          candidates.push(img.path);
+        }
+      }
+    }
+  }
+
+  return candidates.filter((p) => existsSync(p) && !seen.has(p));
+}
+
+/**
+ * Find new images in ~/Desktop and ~/Downloads that haven't been ingested.
+ * Unlike findNewScreenshots(), this finds ALL images, not just screenshots.
+ */
+function findNewImages(): string[] {
+  const seen = loadSeen();
+  const home = homedir();
+  const results: string[] = [];
+
+  for (const dir of [join(home, "Desktop"), join(home, "Downloads")]) {
+    for (const img of listImages(dir)) {
+      if (!seen.has(img.path)) results.push(img.path);
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Auto-ingest new screenshots from Desktop/Downloads into the store.
+ * Called automatically before image resolution — no explicit --scan needed.
+ * Only ingests actual screenshots (via Spotlight metadata).
+ * Returns count of newly ingested images.
+ */
+export function autoIngestScreenshots(): number {
+  const newShots = findNewScreenshots();
+  let count = 0;
+  for (const src of newShots) {
+    ingestImage(src);
+    count++;
+  }
+  return count;
+}
+
+/**
+ * Scan ~/Desktop and ~/Downloads for ALL new images (not just screenshots).
+ * Used by --scan for explicit bulk ingest.
+ * Returns count of newly ingested images.
  */
 export function ingestFromScanDirs(): number {
-  const home = homedir();
-  const scanDirs = [
-    join(home, "Desktop"),
-    join(home, "Downloads"),
-  ];
-
+  const newImages = findNewImages();
   let count = 0;
-  for (const dir of scanDirs) {
-    for (const img of listImages(dir)) {
-      ingestImage(img.path);
-      count++;
-    }
+  for (const src of newImages) {
+    ingestImage(src);
+    count++;
   }
   return count;
 }
@@ -118,10 +192,11 @@ export interface DiscoveredImage {
 }
 
 /**
- * Find the latest unprocessed image in ~/.screenshot-agent/.
- * Returns null if none found.
+ * Find the latest unprocessed image in the store.
+ * Auto-ingests new screenshots first.
  */
 export function findLatestImage(): DiscoveredImage | null {
+  autoIngestScreenshots();
   ensureImageDir();
   const tracked = loadTracked();
   const images = listImages(IMAGE_DIR);
@@ -136,8 +211,15 @@ export function findLatestImage(): DiscoveredImage | null {
 }
 
 /**
- * List all images in ~/.screenshot-agent/ with their processed status.
+ * Find ALL unprocessed images in the store.
+ * Auto-ingests new screenshots first.
  */
+export function findAllUnprocessed(): DiscoveredImage[] {
+  autoIngestScreenshots();
+  return listUnprocessed();
+}
+
+/** List all images with status. Does NOT auto-ingest. */
 export function listAllImages(): DiscoveredImage[] {
   ensureImageDir();
   const tracked = loadTracked();
@@ -150,24 +232,22 @@ export function listAllImages(): DiscoveredImage[] {
   }));
 }
 
-/**
- * List unprocessed images only.
- */
+/** List unprocessed images only. Does NOT auto-ingest. */
 export function listUnprocessed(): DiscoveredImage[] {
   return listAllImages().filter((img) => !img.isProcessed);
 }
 
 /**
- * Resolve an image by name or partial match within ~/.screenshot-agent/.
- * Matches against filename (exact), prefix, or substring.
- * Returns null if no match or ambiguous.
+ * Resolve an image by name or partial match within the store.
+ * Auto-ingests new screenshots first.
  */
 export function findImageByName(query: string): DiscoveredImage | null {
+  autoIngestScreenshots();
   ensureImageDir();
   const tracked = loadTracked();
   const images = listImages(IMAGE_DIR);
 
-  // Exact match first
+  // Exact match
   for (const img of images) {
     if (img.name === query) {
       return { path: img.path, name: img.name, isProcessed: tracked.has(img.name) };
@@ -183,18 +263,12 @@ export function findImageByName(query: string): DiscoveredImage | null {
     return { path: img.path, name: img.name, isProcessed: tracked.has(img.name) };
   }
 
-  // Substring match
+  // Substring match — return newest
   const subMatches = images.filter((img) =>
     img.name.toLowerCase().includes(query.toLowerCase())
   );
-  if (subMatches.length === 1) {
+  if (subMatches.length > 0) {
     const img = subMatches[0];
-    return { path: img.path, name: img.name, isProcessed: tracked.has(img.name) };
-  }
-
-  // If multiple substring matches, return newest
-  if (subMatches.length > 1) {
-    const img = subMatches[0]; // already sorted by mtime desc
     return { path: img.path, name: img.name, isProcessed: tracked.has(img.name) };
   }
 
