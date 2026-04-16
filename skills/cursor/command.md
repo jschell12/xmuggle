@@ -11,14 +11,14 @@ Screenshots are auto-detected from Desktop/Downloads.
 
 ```bash
 # Latest screenshot, local
-screenshot-agent --repo <repo> --msg "<message>"
+look --repo <repo> --msg "<message>"
 
 # Specific images
-screenshot-agent --repo <repo> --img "<name>" --msg "<message>"
+look --repo <repo> --img "<name>" --msg "<message>"
 
 # All unprocessed
-screenshot-agent --repo <repo> --all --msg "<message>"
+look --repo <repo> --all --msg "<message>"
 
 # Forward to another Mac on the LAN
-screenshot-agent --repo <repo> --remote --msg "<message>"
+look --repo <repo> --remote --msg "<message>"
 ```

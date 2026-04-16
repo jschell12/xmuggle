@@ -25,7 +25,7 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MAC_LINK = resolve(__dirname, "..", "scripts", "mac-link.sh");
 
-const USAGE = `Usage: screenshot-agent --repo <repo> [--img <name>]... [--all] [--msg "context"] [--remote [--host <host>] [--user <user>]] [--list] [--scan]
+const USAGE = `Usage: look --repo <repo> [--img <name>]... [--all] [--msg "context"] [--remote [--host <host>] [--user <user>]] [--list] [--scan]
 
   --repo  <repo>   GitHub repo (owner/name or URL) or local path
   --img   <name>   Select image(s) by name or partial match (repeatable)
@@ -35,24 +35,24 @@ const USAGE = `Usage: screenshot-agent --repo <repo> [--img <name>]... [--all] [
   --host  <host>   Remote hostname/IP (with --remote). If omitted, runs
                    mac-link.sh to discover Macs on the LAN
   --user  <user>   Remote SSH user (defaults to current \$USER)
-  --list           List all images in ~/.screenshot-agent/ and their status
+  --list           List all images in ~/.look/ and their status
   --scan           Scan ~/Desktop and ~/Downloads for ALL images (not just screenshots)
 
 Image detection:
   New screenshots are auto-detected from ~/Desktop and ~/Downloads via
-  macOS Spotlight (kMDItemIsScreenCapture) and copied into ~/.screenshot-agent/.
+  macOS Spotlight (kMDItemIsScreenCapture) and copied into ~/.look/.
   No manual step needed — just take a screenshot and run the command.
 
   --scan is only needed to ingest non-screenshot images (downloads, etc).
 
 Examples:
-  screenshot-agent --repo jschell12/my-app                        # latest new screenshot
-  screenshot-agent --repo jschell12/my-app --all                  # all new screenshots
-  screenshot-agent --repo jschell12/my-app --msg "fix the btn"    # with context
-  screenshot-agent --repo jschell12/my-app --img bug1 --img bug2  # multiple images
-  screenshot-agent --repo jschell12/my-app --remote               # pick remote host on LAN
-  screenshot-agent --repo jschell12/my-app --remote --host mac.local
-  screenshot-agent --list                                         # see images + status`;
+  look --repo jschell12/my-app                        # latest new screenshot
+  look --repo jschell12/my-app --all                  # all new screenshots
+  look --repo jschell12/my-app --msg "fix the btn"    # with context
+  look --repo jschell12/my-app --img bug1 --img bug2  # multiple images
+  look --repo jschell12/my-app --remote               # pick remote host on LAN
+  look --repo jschell12/my-app --remote --host mac.local
+  look --list                                         # see images + status`;
 
 function parseArgs(argv: string[]) {
   const args = argv.slice(2);
@@ -104,7 +104,7 @@ function resolveImages(imgs: string[]): string[] {
   for (const query of imgs) {
     const found = findImageByName(query);
     if (!found) {
-      console.error(`Error: no image matching "${query}" in ~/.screenshot-agent/`);
+      console.error(`Error: no image matching "${query}" in ~/.look/`);
       console.error("Run --list to see available images.");
       process.exit(1);
     }
@@ -154,7 +154,7 @@ async function runRemote(
   const taskIds: string[] = [];
   for (const screenshotPath of screenshotPaths) {
     const taskId = createTaskId();
-    const tmpBase = join(tmpdir(), "screenshot-agent-tasks");
+    const tmpBase = join(tmpdir(), "look-tasks");
     mkdirSync(tmpBase, { recursive: true });
 
     const payload: TaskPayload = {
@@ -208,7 +208,7 @@ async function main() {
 
   if (scan) {
     const count = ingestFromScanDirs();
-    console.log(`Ingested ${count} image(s) into ~/.screenshot-agent/`);
+    console.log(`Ingested ${count} image(s) into ~/.look/`);
     if (!repo) process.exit(0);
   }
 
@@ -218,12 +218,12 @@ async function main() {
 
     const images = listAllImages();
     if (images.length === 0) {
-      console.log("No images in ~/.screenshot-agent/");
+      console.log("No images in ~/.look/");
       console.log("Take a screenshot, or run --scan to ingest all images from Desktop/Downloads.");
     } else {
       const unprocessed = images.filter((i) => !i.isProcessed).length;
       console.log(
-        `${images.length} image(s) in ~/.screenshot-agent/ (${unprocessed} unprocessed):\n`
+        `${images.length} image(s) in ~/.look/ (${unprocessed} unprocessed):\n`
       );
       for (const img of images) {
         const status = img.isProcessed ? "done" : "pending";
@@ -246,7 +246,7 @@ async function main() {
   } else if (all) {
     const unprocessed = findAllUnprocessed();
     if (unprocessed.length === 0) {
-      console.error("No unprocessed images in ~/.screenshot-agent/");
+      console.error("No unprocessed images in ~/.look/");
       console.error("Take a screenshot, or run --scan to ingest from Desktop/Downloads.");
       process.exit(1);
     }
@@ -255,7 +255,7 @@ async function main() {
   } else {
     const found = findLatestImage();
     if (!found) {
-      console.error("No unprocessed images in ~/.screenshot-agent/");
+      console.error("No unprocessed images in ~/.look/");
       console.error("Take a screenshot, or run --scan to ingest from Desktop/Downloads.");
       process.exit(1);
     }

@@ -1,12 +1,12 @@
-# screenshot-agent
+# look
 
-Screenshot-driven code fixes. Take a screenshot, invoke `/look` or run `screenshot-agent`, and a Claude Code agent analyzes the image, finds the relevant code, fixes it, opens a PR, and merges it.
+Screenshot-driven code fixes. Take a screenshot, invoke `/look` or run `look`, and a Claude Code agent analyzes the image, finds the relevant code, fixes it, opens a PR, and merges it.
 
 ## Install
 
 ```bash
-git clone git@github.com:jschell12/screenshot-agent.git
-cd screenshot-agent
+git clone git@github.com:jschell12/look.git
+cd look
 pnpm install
 make install    # builds, links CLI, installs /look skill
 ```
@@ -14,29 +14,29 @@ make install    # builds, links CLI, installs /look skill
 That's it. Take a screenshot and run:
 
 ```bash
-screenshot-agent --repo jschell12/my-app
+look --repo jschell12/my-app
 ```
 
 ## Usage
 
 ```bash
 # Fix the latest unprocessed screenshot
-screenshot-agent --repo jschell12/my-app
+look --repo jschell12/my-app
 
 # With context
-screenshot-agent --repo jschell12/my-app --msg "the submit button overlaps the footer"
+look --repo jschell12/my-app --msg "the submit button overlaps the footer"
 
 # Specific image (fuzzy name match)
-screenshot-agent --repo jschell12/my-app --img "Screenshot 2026-04-14"
+look --repo jschell12/my-app --img "Screenshot 2026-04-14"
 
 # Multiple images
-screenshot-agent --repo jschell12/my-app --img bug1 --img bug2 --msg "same issue on different pages"
+look --repo jschell12/my-app --img bug1 --img bug2 --msg "same issue on different pages"
 
 # All unprocessed screenshots
-screenshot-agent --repo jschell12/my-app --all
+look --repo jschell12/my-app --all
 
 # See what's in the store
-screenshot-agent --list
+look --list
 ```
 
 ### What happens
@@ -53,10 +53,10 @@ Forward a task to another Mac on the LAN — useful when your work laptop can't 
 
 ```bash
 # Interactive: Bonjour/mDNS discovers Macs advertising SSH
-screenshot-agent --repo jschell12/my-app --remote
+look --repo jschell12/my-app --remote
 
 # Or specify directly
-screenshot-agent --repo jschell12/my-app --remote --host macmini.local
+look --repo jschell12/my-app --remote --host macmini.local
 ```
 
 The target Mac needs the daemon running:
@@ -66,13 +66,13 @@ The target Mac needs the daemon running:
 make daemon-install
 ```
 
-The daemon watches `~/.screenshot-agent/queue/` and dispatches tasks to an agent-queue worker pool (up to 3 parallel workers with merge locking).
+The daemon watches `~/.look/queue/` and dispatches tasks to an agent-queue worker pool (up to 3 parallel workers with merge locking).
 
 ## Image detection
 
-New screenshots are **auto-detected** via macOS Spotlight (`kMDItemIsScreenCapture`) from `~/Desktop` and `~/Downloads`, and copied into `~/.screenshot-agent/`. No manual step needed — just take a screenshot and run the command.
+New screenshots are **auto-detected** via macOS Spotlight (`kMDItemIsScreenCapture`) from `~/Desktop` and `~/Downloads`, and copied into `~/.look/`. No manual step needed — just take a screenshot and run the command.
 
-Already-processed images are tracked in `~/.screenshot-agent/.tracked`.
+Already-processed images are tracked in `~/.look/.tracked`.
 
 Use `--scan` if you want to ingest non-screenshot images (downloaded files, etc.) as well.
 

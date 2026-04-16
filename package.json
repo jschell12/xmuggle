@@ -1,11 +1,11 @@
 {
-  "name": "screenshot-agent",
+  "name": "look",
   "version": "0.1.0",
   "description": "Screenshot-driven code fixes — give it an image, repo, and optional message, and an agent fixes the code",
   "type": "module",
   "bin": {
-    "screenshot-agent": "./dist/index.js",
-    "screenshot-agent-daemon": "./dist/daemon.js"
+    "look": "./dist/index.js",
+    "look-daemon": "./dist/daemon.js"
   },
   "scripts": {
     "build": "tsup",

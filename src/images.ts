@@ -15,7 +15,7 @@ import { basename, extname, join } from "node:path";
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"]);
 
 /** Central image store */
-const IMAGE_DIR = join(homedir(), ".screenshot-agent");
+const IMAGE_DIR = join(homedir(), ".look");
 const TRACKED_FILE = join(IMAGE_DIR, ".tracked");
 const SEEN_FILE = join(IMAGE_DIR, ".seen");
 
@@ -84,7 +84,7 @@ function listImages(dir: string): { path: string; name: string; mtime: number }[
 }
 
 /**
- * Copy an image into ~/.screenshot-agent/ (copy, not move — leave originals).
+ * Copy an image into ~/.look/ (copy, not move — leave originals).
  * Returns the new path. Deduplicates by name.
  */
 function ingestImage(srcPath: string): string {

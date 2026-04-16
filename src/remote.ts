@@ -13,11 +13,11 @@ function sshTarget(t: RemoteTarget): string {
 }
 
 function queueDir(t: RemoteTarget): string {
-  return t.queueDir ?? "~/.screenshot-agent/queue";
+  return t.queueDir ?? "~/.look/queue";
 }
 
 function resultsDir(t: RemoteTarget): string {
-  return t.resultsDir ?? "~/.screenshot-agent/results";
+  return t.resultsDir ?? "~/.look/results";
 }
 
 function exec(

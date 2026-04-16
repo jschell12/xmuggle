@@ -12,11 +12,11 @@ export function buildPrompt(opts: PromptOptions): string {
     /^[\w-]+\/[\w.-]+$/.test(opts.repo);
 
   const timestamp = Date.now();
-  const branch = `screenshot-fix/${timestamp}`;
+  const branch = `look-fix/${timestamp}`;
 
   const repoSetup = isUrl
-    ? `Clone the repo: git clone https://github.com/${opts.repo.replace(/^https:\/\/github\.com\//, "")} /tmp/screenshot-agent-${timestamp}
-cd /tmp/screenshot-agent-${timestamp}`
+    ? `Clone the repo: git clone https://github.com/${opts.repo.replace(/^https:\/\/github\.com\//, "")} /tmp/look-${timestamp}
+cd /tmp/look-${timestamp}`
     : `cd ${opts.repo}`;
 
   const userContext = opts.message
@@ -62,7 +62,7 @@ gh pr create --title "<concise description of the fix>" --body "## Screenshot an
 <what you changed and why>
 
 ---
-Automated fix by screenshot-agent"
+Automated fix by look"
 
 Then merge it:
 gh pr merge --squash --auto
@@ -122,7 +122,7 @@ ITEM=$(${opts.aqScripts}/agent-queue claim -p ${opts.project} --agent ${opts.age
 If claim returns empty or fails, the queue is empty — exit successfully.
 
 Parse the JSON to get the item ID and title. The title format is:
-\`screenshot-fix:<task-id>\` where task-id maps to a directory in the screenshot tasks dir.
+\`look-fix:<task-id>\` where task-id maps to a directory in the screenshot tasks dir.
 
 ### 3. Read the screenshot
 

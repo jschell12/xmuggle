@@ -2,19 +2,19 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PLIST_LABEL="com.screenshot-agent.daemon"
+PLIST_LABEL="com.look.daemon"
 PLIST_DEST="$HOME/Library/LaunchAgents/${PLIST_LABEL}.plist"
 PLIST_TEMPLATE="$REPO_DIR/launchd/${PLIST_LABEL}.plist"
 
-echo "=== Installing screenshot-agent daemon ==="
+echo "=== Installing look daemon ==="
 echo ""
-echo "This machine will process screenshot tasks pushed into ~/.screenshot-agent/queue/"
+echo "This machine will process screenshot tasks pushed into ~/.look/queue/"
 echo "by other Macs on the LAN (via scp/rsync using mac-link.sh or the /look skill)."
 echo ""
 
 # Create directories
 echo "Creating directories..."
-mkdir -p ~/.screenshot-agent/{queue,results,logs}
+mkdir -p ~/.look/{queue,results,logs}
 
 # Build
 echo "Building..."
@@ -50,8 +50,8 @@ launchctl load "$PLIST_DEST"
 
 echo "Daemon started."
 echo ""
-echo "Verify with: launchctl list | grep screenshot-agent"
-echo "Logs at: ~/.screenshot-agent/logs/"
+echo "Verify with: launchctl list | grep com.look"
+echo "Logs at: ~/.look/logs/"
 echo ""
 echo "Control:"
 echo "  make daemon-start   # start daemon"

@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.screenshot-agent.daemon</string>
+  <string>com.look.daemon</string>
   <key>ProgramArguments</key>
   <array>
     <string>__NODE_PATH__</string>
@@ -14,9 +14,9 @@
   <key>RunAtLoad</key>
   <true/>
   <key>StandardOutPath</key>
-  <string>__HOME__/.screenshot-agent/logs/daemon.stdout.log</string>
+  <string>__HOME__/.look/logs/daemon.stdout.log</string>
   <key>StandardErrorPath</key>
-  <string>__HOME__/.screenshot-agent/logs/daemon.stderr.log</string>
+  <string>__HOME__/.look/logs/daemon.stderr.log</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>

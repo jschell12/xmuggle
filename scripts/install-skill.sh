@@ -14,10 +14,10 @@ echo "Building..."
 echo "Linking globally..."
 (cd "$REPO_DIR" && pnpm link --global 2>/dev/null || npm link 2>/dev/null || true)
 
-if command -v screenshot-agent &>/dev/null; then
-  echo "screenshot-agent CLI installed on PATH"
+if command -v look &>/dev/null; then
+  echo "look CLI installed on PATH"
 else
-  echo "Note: screenshot-agent not found on PATH."
+  echo "Note: look not found on PATH."
   echo "You can run it directly: node $REPO_DIR/dist/index.js"
 fi
 
@@ -43,6 +43,6 @@ echo ""
 echo "Done! Use /look in Claude Code or Cursor."
 echo ""
 echo "Examples:"
-echo "  screenshot-agent --list                              # see screenshots"
-echo "  screenshot-agent --repo jschell12/my-app             # fix latest screenshot"
-echo "  screenshot-agent --repo jschell12/my-app --all       # fix all unprocessed"
+echo "  look --list                              # see screenshots"
+echo "  look --repo jschell12/my-app             # fix latest screenshot"
+echo "  look --repo jschell12/my-app --all       # fix all unprocessed"

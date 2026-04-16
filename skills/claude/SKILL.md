@@ -27,26 +27,26 @@ Analyze screenshot(s), identify the problem, and fix the code. New screenshots a
 2. **See what's available**:
 
 ```bash
-screenshot-agent --list
+look --list
 ```
 
 3. **Run the fix**:
 
 ```bash
 # Process locally (default)
-screenshot-agent --repo <repo> --msg "<message>"
+look --repo <repo> --msg "<message>"
 
 # Specific / multiple images
-screenshot-agent --repo <repo> --img "<name>" [--img "<name2>"] --msg "<message>"
+look --repo <repo> --img "<name>" [--img "<name2>"] --msg "<message>"
 
 # All unprocessed
-screenshot-agent --repo <repo> --all --msg "<message>"
+look --repo <repo> --all --msg "<message>"
 
 # Forward to another Mac on the LAN (interactive host discovery)
-screenshot-agent --repo <repo> --remote --msg "<message>"
+look --repo <repo> --remote --msg "<message>"
 
 # Forward to a specific host
-screenshot-agent --repo <repo> --remote --host mac.local --msg "<message>"
+look --repo <repo> --remote --host mac.local --msg "<message>"
 ```
 
 4. **Report the result** to the user — mention what was fixed and that they can `git pull` to get changes.
@@ -67,6 +67,6 @@ screenshot-agent --repo <repo> --remote --host mac.local --msg "<message>"
 
 ## Prerequisites
 
-- `screenshot-agent` CLI on PATH (install: `make install` in the screenshot-agent repo)
+- `look` CLI on PATH (install: `make install` in the look repo)
 - `claude` and `gh` CLIs on PATH
 - For `--remote`: SSH enabled on the target Mac, daemon running (`make daemon-install`)

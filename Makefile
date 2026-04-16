@@ -1,6 +1,6 @@
 .PHONY: build install daemon-install daemon-uninstall daemon-start daemon-stop daemon-logs link clean
 
-DAEMON_PLIST := $(HOME)/Library/LaunchAgents/com.screenshot-agent.daemon.plist
+DAEMON_PLIST := $(HOME)/Library/LaunchAgents/com.look.daemon.plist
 
 build:
 	pnpm build
@@ -25,7 +25,7 @@ daemon-stop:
 	launchctl unload $(DAEMON_PLIST)
 
 daemon-logs:
-	tail -f ~/.screenshot-agent/logs/daemon.stdout.log
+	tail -f ~/.look/logs/daemon.stdout.log
 
 # Interactive LAN discovery + tunnel/push/pull
 link:

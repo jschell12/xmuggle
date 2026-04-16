@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-export const CONFIG_DIR = join(homedir(), ".screenshot-agent");
+export const CONFIG_DIR = join(homedir(), ".look");
 export const QUEUE_DIR = join(CONFIG_DIR, "queue");
 export const RESULTS_DIR = join(CONFIG_DIR, "results");
 export const LOGS_DIR = join(CONFIG_DIR, "logs");

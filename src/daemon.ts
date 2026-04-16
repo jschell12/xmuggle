@@ -115,7 +115,7 @@ async function enqueueTask(
   await aq(["init", "-p", project]);
 
   // Add item with title encoding the task-id
-  const title = `screenshot-fix:${taskId}`;
+  const title = `look-fix:${taskId}`;
   const desc = task.message ?? "Screenshot-driven fix";
   const { code } = await aq([
     "add",
