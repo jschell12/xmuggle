@@ -79,7 +79,7 @@ launchctl load "$WATCHER_PLIST_DEST"
 echo "File watcher installed and started."
 
 # Install Claude Code skill
-CLAUDE_SKILLS_DIR="$HOME/.claude/skills/screenshot-fix"
+CLAUDE_SKILLS_DIR="$HOME/.claude/skills/look"
 if [[ -d "$HOME/.claude" ]]; then
   echo ""
   echo "Detected Claude Code. Installing skill..."
@@ -94,8 +94,8 @@ if [[ -d "$HOME/.cursor" ]]; then
   echo ""
   echo "Detected Cursor. Installing command..."
   mkdir -p "$CURSOR_COMMANDS_DIR"
-  cp "$REPO_DIR/skills/cursor/command.md" "$CURSOR_COMMANDS_DIR/screenshot-fix.md"
-  echo "Cursor command installed at $CURSOR_COMMANDS_DIR/screenshot-fix.md"
+  cp "$REPO_DIR/skills/cursor/command.md" "$CURSOR_COMMANDS_DIR/look.md"
+  echo "Cursor command installed at $CURSOR_COMMANDS_DIR/look.md"
 fi
 
 echo ""
@@ -110,5 +110,5 @@ echo "  1. Drop an image into either folder → auto-sent to personal machine"
 echo "  2. For specific repo/message, add a sidecar JSON:"
 echo "     bug.png + bug.json → {\"repo\": \"owner/repo\", \"msg\": \"fix the button\"}"
 echo "  3. Or use subdirectories: ~/Desktop/$SSH_HOST/owner/repo/screenshot.png"
-echo "  4. Or use the CLI: screenshot-agent ./bug.png --repo owner/repo --remote"
-echo "  5. Or use /screenshot-fix in Claude Code"
+echo "  4. Or use the CLI: screenshot-agent --repo owner/repo --remote"
+echo "  5. Or use /look in Claude Code or Cursor"

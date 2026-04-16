@@ -1,27 +1,30 @@
 ---
-name: screenshot-fix
-description: Analyze a screenshot to identify a bug or UI issue, then fix the code in the target repo
+name: look
+description: Analyze screenshot(s) to identify bugs or UI issues and fix the code
 ---
 
-# Screenshot Fix (Cursor Command)
+# /look (Cursor Command)
 
-Give this tool a screenshot + optional message, and it fixes the code.
+Analyze screenshot(s), identify the problem, and fix the code. Screenshots are auto-detected from Desktop/Downloads.
 
 ## Usage
 
 Gather:
-1. **Screenshot**: path to the image file
-2. **Repo**: GitHub repo (owner/name) or local path
-3. **Message** (optional): what to fix or look for
+1. **Repo**: GitHub repo (owner/name) or local path
+2. **Message** (optional): what to fix or look for
 
 Run in the terminal:
 
 ```bash
-# Local processing
-screenshot-agent <screenshot> --repo <repo> --msg "<message>"
+# Latest screenshot
+screenshot-agent --repo <repo> --msg "<message>"
 
-# Remote processing (forward to another machine)
-screenshot-agent <screenshot> --repo <repo> --msg "<message>" --remote
+# All unprocessed screenshots
+screenshot-agent --repo <repo> --all --msg "<message>"
+
+# Specific image(s)
+screenshot-agent --repo <repo> --img "<name>" --msg "<message>"
+
+# Forward to remote machine
+screenshot-agent --repo <repo> --msg "<message>" --remote
 ```
-
-The agent analyzes the screenshot, finds relevant code, makes fixes, creates a PR, and merges it.
