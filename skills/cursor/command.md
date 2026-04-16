@@ -5,7 +5,7 @@ description: Analyze screenshot(s) to identify bugs or UI issues and fix the cod
 
 # /look (Cursor Command)
 
-Screenshots are auto-detected from Desktop/Downloads.
+Screenshots are auto-detected from ~/Desktop.
 
 ## Usage
 

@@ -70,7 +70,7 @@ The daemon watches `~/.look/queue/` and dispatches tasks to an agent-queue worke
 
 ## Image detection
 
-New screenshots are **auto-detected** via macOS Spotlight (`kMDItemIsScreenCapture`) from `~/Desktop` and `~/Downloads`, and copied into `~/.look/`. No manual step needed — just take a screenshot and run the command.
+New screenshots are **auto-detected** via macOS Spotlight (`kMDItemIsScreenCapture`) from `~/Desktop`, and copied into `~/.look/`. No manual step needed — just take a screenshot and run the command.
 
 Already-processed images are tracked in `~/.look/.tracked`.
 

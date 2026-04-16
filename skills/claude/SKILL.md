@@ -2,13 +2,13 @@
 name: look
 description: >-
   Analyze screenshot(s) to identify bugs or UI issues and fix the code.
-  Auto-detects new screenshots from Desktop/Downloads. Works locally
+  Auto-detects new screenshots from ~/Desktop. Works locally
   or forwards to a discovered Mac on the LAN.
 ---
 
 # /look
 
-Analyze screenshot(s), identify the problem, and fix the code. New screenshots are auto-detected from your Desktop and Downloads via macOS Spotlight — just take a screenshot and invoke `/look`.
+Analyze screenshot(s), identify the problem, and fix the code. New screenshots are auto-detected from your ~/Desktop via macOS Spotlight — just take a screenshot and invoke `/look`.
 
 ## When to trigger
 
@@ -63,7 +63,7 @@ look --repo <repo> --remote --host mac.local --msg "<message>"
 | `--host <host>` | Specific remote hostname (with --remote) |
 | `--user <user>` | SSH user on remote (with --remote) |
 | `--list` | Show all images and status |
-| `--scan` | Ingest ALL images from Desktop/Downloads |
+| `--scan` | Ingest ALL images from ~/Desktop |
 
 ## Prerequisites
 

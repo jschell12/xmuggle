@@ -117,18 +117,15 @@ function findNewScreenshots(): string[] {
 
   try {
     const output = execSync(
-      `mdfind 'kMDItemIsScreenCapture = 1' -onlyin "${homedir()}/Desktop" -onlyin "${homedir()}/Downloads"`,
+      `mdfind 'kMDItemIsScreenCapture = 1' -onlyin "${homedir()}/Desktop"`,
       { encoding: "utf-8", timeout: 10_000 }
     );
     candidates = output.trim().split("\n").filter(Boolean);
   } catch {
-    // Fallback: scan Desktop/Downloads for Screenshot*.png pattern
-    const home = homedir();
-    for (const dir of [join(home, "Desktop"), join(home, "Downloads")]) {
-      for (const img of listImages(dir)) {
-        if (img.name.startsWith("Screenshot")) {
-          candidates.push(img.path);
-        }
+    // Fallback: scan Desktop for Screenshot*.png pattern
+    for (const img of listImages(join(homedir(), "Desktop"))) {
+      if (img.name.startsWith("Screenshot")) {
+        candidates.push(img.path);
       }
     }
   }
@@ -137,25 +134,22 @@ function findNewScreenshots(): string[] {
 }
 
 /**
- * Find new images in ~/Desktop and ~/Downloads that haven't been ingested.
+ * Find new images in ~/Desktop that haven't been ingested.
  * Unlike findNewScreenshots(), this finds ALL images, not just screenshots.
  */
 function findNewImages(): string[] {
   const seen = loadSeen();
-  const home = homedir();
   const results: string[] = [];
 
-  for (const dir of [join(home, "Desktop"), join(home, "Downloads")]) {
-    for (const img of listImages(dir)) {
-      if (!seen.has(img.path)) results.push(img.path);
-    }
+  for (const img of listImages(join(homedir(), "Desktop"))) {
+    if (!seen.has(img.path)) results.push(img.path);
   }
 
   return results;
 }
 
 /**
- * Auto-ingest new screenshots from Desktop/Downloads into the store.
+ * Auto-ingest new screenshots from ~/Desktop into the store.
  * Called automatically before image resolution — no explicit --scan needed.
  * Only ingests actual screenshots (via Spotlight metadata).
  * Returns count of newly ingested images.
@@ -171,7 +165,7 @@ export function autoIngestScreenshots(): number {
 }
 
 /**
- * Scan ~/Desktop and ~/Downloads for ALL new images (not just screenshots).
+ * Scan ~/Desktop for ALL new images (not just screenshots).
  * Used by --scan for explicit bulk ingest.
  * Returns count of newly ingested images.
  */

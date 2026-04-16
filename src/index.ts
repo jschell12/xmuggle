@@ -36,10 +36,10 @@ const USAGE = `Usage: look --repo <repo> [--img <name>]... [--all] [--msg "conte
                    mac-link.sh to discover Macs on the LAN
   --user  <user>   Remote SSH user (defaults to current \$USER)
   --list           List all images in ~/.look/ and their status
-  --scan           Scan ~/Desktop and ~/Downloads for ALL images (not just screenshots)
+  --scan           Scan ~/Desktop for ALL images (not just screenshots)
 
 Image detection:
-  New screenshots are auto-detected from ~/Desktop and ~/Downloads via
+  New screenshots are auto-detected from ~/Desktop via
   macOS Spotlight (kMDItemIsScreenCapture) and copied into ~/.look/.
   No manual step needed — just take a screenshot and run the command.
 
@@ -219,7 +219,7 @@ async function main() {
     const images = listAllImages();
     if (images.length === 0) {
       console.log("No images in ~/.look/");
-      console.log("Take a screenshot, or run --scan to ingest all images from Desktop/Downloads.");
+      console.log("Take a screenshot, or run --scan to ingest all images from ~/Desktop.");
     } else {
       const unprocessed = images.filter((i) => !i.isProcessed).length;
       console.log(
@@ -247,7 +247,7 @@ async function main() {
     const unprocessed = findAllUnprocessed();
     if (unprocessed.length === 0) {
       console.error("No unprocessed images in ~/.look/");
-      console.error("Take a screenshot, or run --scan to ingest from Desktop/Downloads.");
+      console.error("Take a screenshot, or run --scan to ingest from ~/Desktop.");
       process.exit(1);
     }
     screenshotPaths = unprocessed.map((img) => img.path);
@@ -256,7 +256,7 @@ async function main() {
     const found = findLatestImage();
     if (!found) {
       console.error("No unprocessed images in ~/.look/");
-      console.error("Take a screenshot, or run --scan to ingest from Desktop/Downloads.");
+      console.error("Take a screenshot, or run --scan to ingest from ~/Desktop.");
       process.exit(1);
     }
     screenshotPaths = [found.path];
