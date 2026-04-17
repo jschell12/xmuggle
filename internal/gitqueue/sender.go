@@ -15,14 +15,27 @@ import (
 )
 
 type SendArgs struct {
-	TaskID         string
-	Repo           string
-	Message        string
-	ScreenshotPath string
-	Recipient      string // hostname override; empty uses default
+	TaskID          string
+	Repo            string
+	Message         string
+	ScreenshotPath  string   // single (legacy callers)
+	ScreenshotPaths []string // multi-image
+	Recipient       string   // hostname override; empty uses default
+}
+
+// screenshotPaths returns the canonical list: multi if set, else wraps single.
+func (a *SendArgs) screenshotPaths() []string {
+	if len(a.ScreenshotPaths) > 0 {
+		return a.ScreenshotPaths
+	}
+	if a.ScreenshotPath != "" {
+		return []string{a.ScreenshotPath}
+	}
+	return nil
 }
 
 // SendTask encrypts and pushes a task to the queue repo.
+// Supports both single and multi-image tasks.
 func SendTask(cfg *config.Config, args SendArgs) error {
 	if cfg.Git == nil {
 		return fmt.Errorf("git transport not configured; run: xmuggle init-send <owner/repo> (or init-recv on the processing machine)")
@@ -50,17 +63,13 @@ func SendTask(cfg *config.Config, args SendArgs) error {
 		return err
 	}
 
-	shotBytes, err := os.ReadFile(args.ScreenshotPath)
-	if err != nil {
-		return fmt.Errorf("read screenshot: %w", err)
-	}
-	ext := strings.ToLower(filepath.Ext(args.ScreenshotPath))
-	if ext == "" {
-		ext = ".png"
+	paths := args.screenshotPaths()
+	if len(paths) == 0 {
+		return fmt.Errorf("no screenshot paths given")
 	}
 
 	payload := Payload{
-		Version:           1,
+		Version:           2,
 		TaskID:            args.TaskID,
 		SenderHostname:    cfg.Hostname,
 		RecipientHostname: recipientHost,
@@ -68,8 +77,36 @@ func SendTask(cfg *config.Config, args SendArgs) error {
 		Message:           args.Message,
 		Timestamp:         time.Now().UnixMilli(),
 	}
-	payload.Screenshot.Name = "screenshot" + ext
-	payload.Screenshot.DataB64 = base64.StdEncoding.EncodeToString(shotBytes)
+
+	if len(paths) == 1 {
+		// Single image — backward-compatible path
+		shotBytes, err := os.ReadFile(paths[0])
+		if err != nil {
+			return fmt.Errorf("read screenshot: %w", err)
+		}
+		ext := strings.ToLower(filepath.Ext(paths[0]))
+		if ext == "" {
+			ext = ".png"
+		}
+		payload.Screenshot.Name = "screenshot" + ext
+		payload.Screenshot.DataB64 = base64.StdEncoding.EncodeToString(shotBytes)
+	} else {
+		// Multi-image
+		for i, p := range paths {
+			shotBytes, err := os.ReadFile(p)
+			if err != nil {
+				return fmt.Errorf("read screenshot %s: %w", p, err)
+			}
+			ext := strings.ToLower(filepath.Ext(p))
+			if ext == "" {
+				ext = ".png"
+			}
+			payload.Screenshots = append(payload.Screenshots, ScreenshotEntry{
+				Name:    fmt.Sprintf("screenshot-%03d%s", i+1, ext),
+				DataB64: base64.StdEncoding.EncodeToString(shotBytes),
+			})
+		}
+	}
 
 	plaintext, err := json.Marshal(payload)
 	if err != nil {
@@ -85,7 +122,7 @@ func SendTask(cfg *config.Config, args SendArgs) error {
 		return err
 	}
 
-	msg := fmt.Sprintf("Queue task %s from %s", args.TaskID, cfg.Hostname)
+	msg := fmt.Sprintf("Queue task %s (%d image(s)) from %s", args.TaskID, len(paths), cfg.Hostname)
 	return CommitAndPush(cfg.Git.CloneDir, []string{rel}, msg, cfg.Git.Branch, cfg.Git.AuthorName, cfg.Git.AuthorEmail)
 }
 

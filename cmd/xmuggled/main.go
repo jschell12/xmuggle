@@ -77,9 +77,9 @@ func (d *daemon) enqueueTask(taskDir string) (projectAndRepo [2]string, ok bool)
 		_ = queue.UpdateTaskStatus(taskDir, queue.StatusError)
 		return
 	}
-	shot := queue.FindScreenshot(taskDir)
-	if shot == "" {
-		d.logf("no screenshot in %s", taskDir)
+	shots := queue.FindScreenshots(taskDir)
+	if len(shots) == 0 {
+		d.logf("no screenshots in %s", taskDir)
 		_ = queue.UpdateTaskStatus(taskDir, queue.StatusError)
 		return
 	}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	"github.com/jschell12/xmuggle/internal/images"
 	"github.com/jschell12/xmuggle/internal/prompt"
 	"github.com/jschell12/xmuggle/internal/queue"
+	"github.com/jschell12/xmuggle/internal/record"
 	"github.com/jschell12/xmuggle/internal/remote"
 	"github.com/jschell12/xmuggle/internal/spawn"
 )
@@ -44,6 +46,7 @@ Transports:
     --to <host>    recipient hostname (overrides default_recipient)
 
 Subcommands:
+  xmuggle rec [--duration 30s] [--fps 1] [--format jpg] [--repo <repo>] [--msg <msg>] [transport flags]
   xmuggle rm <name>... [--all-done]           # remove images from ~/.xmuggle/ by fuzzy name
   xmuggle init-recv <owner/repo> [--peer <sender>] [--json]    # receiver: setup + daemon
   xmuggle init-send <owner/repo> [--peer <receiver>] [--json]  # sender: setup
@@ -86,6 +89,9 @@ func main() {
 		return
 	case "rm":
 		cmdRm(os.Args[2:])
+		return
+	case "rec":
+		cmdRec(os.Args[2:])
 		return
 	case "add-recipient":
 		cmdAddRecipient(os.Args[2:])
@@ -304,32 +310,37 @@ func runRemoteSSH(shotPaths []string, a *mainArgs) {
 	target := remote.Target{Host: host, User: a.user}
 	fmt.Printf("Remote: %s\n", host)
 
-	var taskIDs []string
-	for _, sp := range shotPaths {
-		taskID := queue.NewTaskID()
-		tmpBase := filepath.Join(os.TempDir(), "xmuggle-tasks")
-		_ = os.MkdirAll(tmpBase, 0o755)
+	taskID := queue.NewTaskID()
+	tmpBase := filepath.Join(os.TempDir(), "xmuggle-tasks")
+	_ = os.MkdirAll(tmpBase, 0o755)
 
-		t := queue.Task{
-			Repo:      a.repo,
-			Message:   a.message,
-			Timestamp: time.Now().UnixMilli(),
-			Status:    queue.StatusPending,
-		}
-		taskDir, err := queue.WriteTask(tmpBase, taskID, t, sp)
-		if err != nil {
-			die("write task: %v", err)
-		}
-		fmt.Printf("Sending task %s...\n", taskID)
-		if err := remote.SendTask(target, taskDir, taskID); err != nil {
-			die("send: %v", err)
-		}
-		taskIDs = append(taskIDs, taskID)
+	t := queue.Task{
+		Repo:      a.repo,
+		Message:   a.message,
+		Timestamp: time.Now().UnixMilli(),
+		Status:    queue.StatusPending,
+	}
+
+	var taskDir string
+	var err error
+	if len(shotPaths) == 1 {
+		taskDir, err = queue.WriteTask(tmpBase, taskID, t, shotPaths[0])
+	} else {
+		taskDir, err = queue.WriteTaskMulti(tmpBase, taskID, t, shotPaths)
+	}
+	if err != nil {
+		die("write task: %v", err)
+	}
+	fmt.Printf("Sending task %s (%d image(s))...\n", taskID, len(shotPaths))
+	if err := remote.SendTask(target, taskDir, taskID); err != nil {
+		die("send: %v", err)
+	}
+	for _, sp := range shotPaths {
 		_ = images.MarkProcessed(sp)
 	}
 
-	fmt.Printf("%d task(s) sent. Waiting for results...\n", len(taskIDs))
-	pollForResults(taskIDs, func(id string) (*queue.Result, error) {
+	fmt.Println("Waiting for result...")
+	pollForResults([]string{taskID}, func(id string) (*queue.Result, error) {
 		return remote.PollForResult(target, id, 10*time.Minute, 5*time.Second)
 	}, a.repo)
 }
@@ -353,26 +364,24 @@ func runRemoteGit(shotPaths []string, a *mainArgs) {
 	fmt.Printf("Queue repo: %s\n", cfg.Git.QueueRepo)
 	fmt.Printf("Recipient: %s\n", recipient)
 
-	var taskIDs []string
+	taskID := queue.NewTaskID()
+	fmt.Printf("Encrypting and pushing task %s (%d image(s))...\n", taskID, len(shotPaths))
+	err = gitqueue.SendTask(cfg, gitqueue.SendArgs{
+		TaskID:          taskID,
+		Repo:            a.repo,
+		Message:         a.message,
+		ScreenshotPaths: shotPaths,
+		Recipient:       a.to,
+	})
+	if err != nil {
+		die("send (git): %v", err)
+	}
 	for _, sp := range shotPaths {
-		taskID := queue.NewTaskID()
-		fmt.Printf("Encrypting and pushing task %s...\n", taskID)
-		err := gitqueue.SendTask(cfg, gitqueue.SendArgs{
-			TaskID:         taskID,
-			Repo:           a.repo,
-			Message:        a.message,
-			ScreenshotPath: sp,
-			Recipient:      a.to,
-		})
-		if err != nil {
-			die("send (git): %v", err)
-		}
-		taskIDs = append(taskIDs, taskID)
 		_ = images.MarkProcessed(sp)
 	}
 
-	fmt.Printf("%d task(s) queued. Waiting for results...\n", len(taskIDs))
-	pollForResults(taskIDs, func(id string) (*queue.Result, error) {
+	fmt.Println("Waiting for result...")
+	pollForResults([]string{taskID}, func(id string) (*queue.Result, error) {
 		r, err := gitqueue.PollForResult(cfg, id, 10*time.Minute)
 		if err != nil {
 			return nil, err
@@ -957,6 +966,172 @@ func cmdAddRecipient(args []string) {
 		die("save: %v", err)
 	}
 	fmt.Printf("Added recipient %s\n", hostname)
+}
+
+// cmdRec captures screen frames and optionally auto-submits them as one task.
+func cmdRec(args []string) {
+	var (
+		durStr  string
+		fpsVal  float64 = 1.0
+		format  string  = "jpg"
+		repo    string
+		message string
+		useGit  bool
+		isRemote bool
+		host    string
+		user    string
+		to      string
+	)
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--duration":
+			i++
+			if i < len(args) {
+				durStr = args[i]
+			}
+		case "--fps":
+			i++
+			if i < len(args) {
+				v, err := strconv.ParseFloat(args[i], 64)
+				if err == nil {
+					fpsVal = v
+				}
+			}
+		case "--format":
+			i++
+			if i < len(args) {
+				format = args[i]
+			}
+		case "--repo":
+			i++
+			if i < len(args) {
+				repo = args[i]
+			}
+		case "--msg":
+			i++
+			if i < len(args) {
+				message = args[i]
+			}
+		case "--remote":
+			isRemote = true
+		case "--git":
+			useGit = true
+		case "--host":
+			i++
+			if i < len(args) {
+				host = args[i]
+			}
+		case "--user":
+			i++
+			if i < len(args) {
+				user = args[i]
+			}
+		case "--to":
+			i++
+			if i < len(args) {
+				to = args[i]
+			}
+		}
+	}
+
+	var dur time.Duration
+	if durStr != "" {
+		d, err := time.ParseDuration(durStr)
+		if err != nil {
+			die("invalid duration %q: %v", durStr, err)
+		}
+		dur = d
+	}
+
+	tmpDir := filepath.Join(os.TempDir(), "xmuggle-rec")
+	_ = os.MkdirAll(tmpDir, 0o755)
+
+	rec := record.New(record.Options{
+		Duration:  dur,
+		FPS:       fpsVal,
+		Format:    format,
+		OutputDir: tmpDir,
+	})
+
+	if dur > 0 {
+		fmt.Fprintf(os.Stderr, "Recording for %s (%.0f fps, %s)...\n", dur, fpsVal, format)
+	} else {
+		fmt.Fprintf(os.Stderr, "Recording (%.0f fps, %s)... Press Ctrl+C to stop.\n", fpsVal, format)
+	}
+
+	if err := rec.Start(); err != nil {
+		die("%v", err)
+	}
+
+	// Wait for Ctrl+C or duration expiry
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt)
+
+	if dur > 0 {
+		select {
+		case <-sigCh:
+		case <-time.After(dur + 500*time.Millisecond):
+		}
+	} else {
+		<-sigCh
+	}
+	signal.Stop(sigCh)
+
+	frames := rec.Stop()
+	fmt.Fprintf(os.Stderr, "\nCaptured %d frame(s)\n", len(frames))
+
+	if len(frames) == 0 {
+		fmt.Println("No frames captured.")
+		return
+	}
+
+	// Move frames to ~/.xmuggle/
+	storeDir := config.GetPaths().ConfigDir
+	var storePaths []string
+	for _, f := range frames {
+		dst := filepath.Join(storeDir, filepath.Base(f))
+		if err := os.Rename(f, dst); err != nil {
+			// Cross-device? copy instead
+			data, err2 := os.ReadFile(f)
+			if err2 != nil {
+				die("move frame: %v", err)
+			}
+			if err2 := os.WriteFile(dst, data, 0o644); err2 != nil {
+				die("write frame: %v", err2)
+			}
+			_ = os.Remove(f)
+		}
+		storePaths = append(storePaths, dst)
+	}
+
+	fmt.Printf("Frames saved to ~/.xmuggle/ (%s-*)\n", rec.Prefix())
+
+	if repo == "" {
+		fmt.Println("\nTo submit:")
+		fmt.Printf("  xmuggle --repo <repo> --img %s\n", rec.Prefix())
+		return
+	}
+
+	// Auto-submit
+	a := &mainArgs{
+		repo:    repo,
+		message: message,
+		useGit:  useGit,
+		remote:  isRemote,
+		host:    host,
+		user:    user,
+		to:      to,
+	}
+
+	fmt.Printf("\nSubmitting %d frames to %s...\n", len(storePaths), repo)
+	switch {
+	case useGit:
+		runRemoteGit(storePaths, a)
+	case isRemote:
+		runRemoteSSH(storePaths, a)
+	default:
+		runLocal(storePaths, a)
+	}
 }
 
 // cmdRm removes images from ~/.xmuggle/ by fuzzy name match.

@@ -88,9 +88,9 @@ func IngestTick(cfg *config.Config) error {
 			continue
 		}
 
-		shotBytes, err := base64.StdEncoding.DecodeString(p.Screenshot.DataB64)
-		if err != nil {
-			gitLogf("b64 decode %s: %v", rel, err)
+		allShots := p.AllScreenshots()
+		if len(allShots) == 0 {
+			gitLogf("no screenshots in %s", rel)
 			continue
 		}
 
@@ -100,10 +100,33 @@ func IngestTick(cfg *config.Config) error {
 			Timestamp: p.Timestamp,
 			Status:    queue.StatusPending,
 		}
-		if _, err := queue.WriteTaskFromBytes(paths.QueueDir, p.TaskID, task, p.Screenshot.Name, shotBytes); err != nil {
-			gitLogf("write local task %s: %v", p.TaskID, err)
-			continue
+
+		if len(allShots) == 1 {
+			shotBytes, err := base64.StdEncoding.DecodeString(allShots[0].DataB64)
+			if err != nil {
+				gitLogf("b64 decode %s: %v", rel, err)
+				continue
+			}
+			if _, err := queue.WriteTaskFromBytes(paths.QueueDir, p.TaskID, task, allShots[0].Name, shotBytes); err != nil {
+				gitLogf("write local task %s: %v", p.TaskID, err)
+				continue
+			}
+		} else {
+			var shots []queue.ScreenshotData
+			for _, s := range allShots {
+				b, err := base64.StdEncoding.DecodeString(s.DataB64)
+				if err != nil {
+					gitLogf("b64 decode %s/%s: %v", rel, s.Name, err)
+					continue
+				}
+				shots = append(shots, queue.ScreenshotData{Name: s.Name, Data: b})
+			}
+			if _, err := queue.WriteTaskFromBytesMulti(paths.QueueDir, p.TaskID, task, shots); err != nil {
+				gitLogf("write multi-image task %s: %v", p.TaskID, err)
+				continue
+			}
 		}
+		gitLogf("ingested task %s from %s (%d image(s))", p.TaskID, p.SenderHostname, len(allShots))
 
 		meta := map[string]string{
 			"sender_hostname": p.SenderHostname,
