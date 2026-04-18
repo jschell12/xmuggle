@@ -116,8 +116,8 @@ Examples:
     xmuggle add-recipient joshs-macbook-pro --default
 
     # --- Send from the work laptop ---
+    xmuggle send --repo jschell12/my-app --screenshots --remote --git
     xmuggle send --repo jschell12/my-app --remote --git --msg "fix the login form"
-    xmuggle rec --duration 30s --repo jschell12/my-app --remote --git --msg "UI glitch"
     xmuggle peers                                                # who's registered
 
   AI agent workflow (Claude Code / Cursor):
