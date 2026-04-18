@@ -76,71 +76,37 @@ Image detection:
   every run. No manual step needed — just take a screenshot and go.
   Use --scan to also ingest non-screenshot images.
 
-Quick start (local — single machine):
-  xmuggle --list                                                # see pending screenshots
-  xmuggle --repo jschell12/my-app --msg "fix the button"        # process latest screenshot
-  xmuggle --repo jschell12/my-app --all                         # process all pending
-  xmuggle rec --duration 30s --repo jschell12/my-app --msg "UI glitch"
-
-Remote (SSH/rsync — same LAN, no encryption):
-  xmuggle --repo jschell12/my-app --remote                      # Bonjour discovery
-  xmuggle --repo jschell12/my-app --remote --host macmini.local # specific host
-  Target Mac needs: make daemon-install or xmuggle init-recv <queue-repo>
-
-Remote setup (two machines, encrypted via GitHub):
-
-  1. Create a private queue repo (once):
-     gh repo create jschell12/xmuggle-queue --private
-
-  2. On the RECEIVING machine (personal laptop — runs the daemon):
-     git clone git@github.com:jschell12/xmuggle.git && cd xmuggle
-     make install
-     xmuggle init-recv jschell12/xmuggle-queue
-
-  3. On the SENDING machine (work laptop — submits tasks):
-     git clone git@github.com:jschell12/xmuggle.git && cd xmuggle
-     make install
-     xmuggle init-send jschell12/xmuggle-queue
-     xmuggle add-recipient <receiver-hostname> --default
-
-  4. Send screenshots from the work laptop:
-     xmuggle --repo jschell12/my-app --remote --git --msg "fix the login form"
-     xmuggle rec --duration 30s --repo jschell12/my-app --remote --git --msg "watch the sidebar"
-
-  5. Check who's registered:
-     xmuggle peers
-
 Examples:
 
   Local (single machine):
     xmuggle --list                                               # see pending
     xmuggle --repo jschell12/my-app --msg "fix the button"       # latest screenshot
     xmuggle --repo jschell12/my-app --img bug1 --img bug2        # multi-image
+    xmuggle --repo jschell12/my-app --all                        # all pending
     xmuggle rec --duration 30s --repo jschell12/my-app            # screen record
 
-  Remote (full session — receiver + sender + send):
+  Remote via SSH (same LAN, no encryption):
+    xmuggle --repo jschell12/my-app --remote                     # Bonjour discovery
+    xmuggle --repo jschell12/my-app --remote --host mac.local    # specific host
+
+  Remote via git (encrypted, works through VPN):
+
+    # --- One-time setup ---
+    gh repo create jschell12/xmuggle-queue --private             # create queue repo
 
     # --- On your personal laptop (receiver) ---
     xmuggle init-recv jschell12/xmuggle-queue
-    #   ✓ Queue repo cloned
-    #   ✓ Age keypair generated + pubkey published
+    #   ✓ Queue repo cloned + age keypair + pubkey published
     #   ✓ Daemon installed and running
 
     # --- On your work laptop (sender) ---
     xmuggle init-send jschell12/xmuggle-queue
-    #   ✓ Queue repo cloned
-    #   ✓ Age keypair generated + pubkey published
-    #   Lists available receivers — pick one:
     xmuggle add-recipient joshs-macbook-pro --default
 
-    # --- Now send from the work laptop ---
+    # --- Send from the work laptop ---
     xmuggle --repo jschell12/my-app --remote --git --msg "fix the login form"
-    xmuggle --repo jschell12/my-app --all --remote --git --msg "fix all pending"
     xmuggle rec --duration 30s --repo jschell12/my-app --remote --git --msg "UI glitch"
-
-    # --- Check status ---
     xmuggle peers                                                # who's registered
-    xmuggle --list                                               # pending images
 
   Cleanup:
     xmuggle rm "Screenshot 2026-04-12"                           # remove by name
