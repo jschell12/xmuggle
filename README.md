@@ -51,6 +51,9 @@ This machine runs the daemon that processes incoming tasks.
 ```bash
 git clone git@github.com:jschell12/xmuggle.git && cd xmuggle
 make install
+
+# Run init-recv from inside the repo you want to fix:
+cd ~/dev/my-app
 xmuggle init-recv jschell12/xmuggle-queue
 ```
 
@@ -58,7 +61,10 @@ xmuggle init-recv jschell12/xmuggle-queue
 - Clones the queue repo + scaffolds directories
 - Generates an age keypair + publishes your pubkey
 - Installs + starts the daemon (launchd)
+- If run from a git repo, registers that repo with this receiver (so senders don't need `--repo`)
 - If senders are already registered, prompts you to cache their pubkey
+
+Run `init-recv` again from other git repos to register additional repos with this receiver.
 
 ### Step 3: Set up the SENDING machine (work laptop)
 
@@ -77,11 +83,17 @@ xmuggle add-recipient <receiver-hostname> --default
 
 ```bash
 # Take a screenshot on the work laptop, then:
-xmuggle --repo jschell12/my-app --remote --git --msg "fix the login form"
+xmuggle send --remote --git --msg "fix the login form"        # repo inferred from receiver
+xmuggle send --remote --git --screenshots                      # pick screenshots interactively
+
+# Override repo if needed:
+xmuggle send --repo jschell12/other-app --remote --git --msg "fix something else"
 
 # Or record the screen and send the frames:
-xmuggle rec --duration 30s --repo jschell12/my-app --remote --git --msg "watch the sidebar"
+xmuggle rec --duration 30s --remote --git --msg "watch the sidebar"
 ```
+
+`--repo` is optional when using `--remote --git` — the target repo is resolved from whatever the receiver registered during `init-recv`. If the receiver has multiple repos, you'll be prompted to pick one.
 
 The task is age-encrypted to the receiver's pubkey, committed to the queue repo. The receiver's daemon picks it up, spawns a Claude agent, fixes the code, pushes a PR, merges it, and encrypts the result back.
 
@@ -121,26 +133,29 @@ xmuggle rec --duration 30s --repo jschell12/my-app            # screen record + 
 
 ```bash
 # --- On your personal laptop (receiver) ---
+cd ~/dev/my-app                                              # a git repo
 xmuggle init-recv jschell12/xmuggle-queue
 #   ✓ Queue repo cloned
 #   ✓ Age keypair generated + pubkey published
 #   ✓ Daemon installed and running
+#   ✓ Registered my-app repo with this receiver
 
 # --- On your work laptop (sender) ---
 xmuggle init-send jschell12/xmuggle-queue
 #   ✓ Queue repo cloned
 #   ✓ Age keypair generated + pubkey published
-#   Lists available receivers — pick one:
+#   Lists available receivers (with their repos) — pick one:
 xmuggle add-recipient joshs-macbook-pro --default
 
-# --- Now send from the work laptop ---
-xmuggle --repo jschell12/my-app --remote --git --msg "fix the login form"
-xmuggle --repo jschell12/my-app --all --remote --git --msg "fix all pending"
-xmuggle rec --duration 30s --repo jschell12/my-app --remote --git --msg "UI glitch"
+# --- Now send from the work laptop (--repo is optional) ---
+xmuggle send --remote --git --msg "fix the login form"      # repo from receiver
+xmuggle send --all --remote --git --msg "fix all pending"
+xmuggle send --repo jschell12/other-app --remote --git       # override repo
+xmuggle rec --duration 30s --remote --git --msg "UI glitch"
 
 # --- Check status ---
 xmuggle peers                                                # who's registered
-xmuggle --list                                               # pending images
+xmuggle list                                                 # pending images
 ```
 
 ### Cleanup

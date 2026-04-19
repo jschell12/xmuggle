@@ -30,14 +30,15 @@ import (
 const usage = `xmuggle — screenshot-driven code fixes
 
 Usage:
-  xmuggle send --repo <repo> [--screenshots] [--img <name>]... [--all] [--msg "context"] [transport]
+  xmuggle send [--repo <repo>] [--screenshots] [--img <name>]... [--all] [--msg "context"] [transport]
   xmuggle list [--json]
   xmuggle <subcommand> [args]
 
   xmuggle --repo <repo> [options]           (legacy — same as 'send')
 
 Send (submit screenshots for fixing):
-  send --repo <repo>      Target GitHub repo (owner/name, URL, or local path)
+  send [--repo <repo>]    Target GitHub repo (owner/name, URL, or local path)
+                           Optional with --git if receiver registered a repo
     --screenshots          Interactive picker: choose 1+ images from a list
     --img   <name>         Select image by fuzzy match (repeatable for multi-image)
     --all                  Process ALL unprocessed images
@@ -51,6 +52,7 @@ Send (submit screenshots for fixing):
       --user <user>          SSH user (default: $USER)
     --remote --git         Forward via age-encrypted private GitHub queue repo
       --to <host>            Recipient hostname (overrides default_recipient)
+                           --repo is optional: resolved from receiver if omitted
 
 List (view available images):
   list                     Show images in ~/.xmuggle/ and their status
@@ -67,6 +69,7 @@ Subcommands:
     --all-done         Remove all processed images
 
   init-recv <owner/repo>   Set up this machine as a receiver (daemon)
+                           Run from a git repo to register it with this receiver
     --peer <sender>    Cache a sender's pubkey locally
     --json             Output peer list as JSON (for AI-driven setup)
 
@@ -107,17 +110,20 @@ Examples:
     gh repo create jschell12/xmuggle-queue --private             # create queue repo
 
     # --- On your personal laptop (receiver) ---
+    cd ~/dev/my-app                                              # a git repo
     xmuggle init-recv jschell12/xmuggle-queue
     #   ✓ Queue repo cloned + age keypair + pubkey published
     #   ✓ Daemon installed and running
+    #   ✓ Registered my-app repo with this receiver
 
     # --- On your work laptop (sender) ---
     xmuggle init-send jschell12/xmuggle-queue
     xmuggle add-recipient joshs-macbook-pro --default
 
-    # --- Send from the work laptop ---
-    xmuggle send --repo jschell12/my-app --screenshots --remote --git
-    xmuggle send --repo jschell12/my-app --remote --git --msg "fix the login form"
+    # --- Send from the work laptop (--repo optional: inferred from receiver) ---
+    xmuggle send --screenshots --remote --git
+    xmuggle send --remote --git --msg "fix the login form"
+    xmuggle send --repo jschell12/other-app --remote --git       # override repo
     xmuggle peers                                                # who's registered
 
   AI agent workflow (Claude Code / Cursor):
@@ -254,8 +260,8 @@ func runMain(rawArgs []string) {
 		return
 	}
 
-	if a.repo == "" {
-		fmt.Fprintln(os.Stderr, "Error: --repo is required")
+	if a.repo == "" && !a.useGit {
+		fmt.Fprintln(os.Stderr, "Error: --repo is required (or use --remote --git to infer from receiver)")
 		fmt.Println(usage)
 		os.Exit(1)
 	}
@@ -300,7 +306,9 @@ func runMain(rawArgs []string) {
 		names = append(names, filepath.Base(p))
 	}
 	fmt.Printf("Screenshot(s): %s\n", strings.Join(names, ", "))
-	fmt.Printf("Target repo: %s\n", a.repo)
+	if a.repo != "" {
+		fmt.Printf("Target repo: %s\n", a.repo)
+	}
 	if a.message != "" {
 		fmt.Printf("Context: %s\n", a.message)
 	}
@@ -413,6 +421,20 @@ func runRemoteGit(shotPaths []string, a *mainArgs) {
 	if recipient == "" {
 		recipient = cfg.DefaultRecipient
 	}
+	if recipient == "" {
+		die("no recipient specified; run: xmuggle add-recipient <host> --default or pass --to <host>")
+	}
+
+	repo := a.repo
+	if repo == "" {
+		r, err := resolveReceiverRepo(cfg, recipient)
+		if err != nil {
+			die("%v", err)
+		}
+		repo = r
+		fmt.Printf("Target repo (from receiver): %s\n", repo)
+	}
+
 	fmt.Printf("Queue repo: %s\n", cfg.Git.QueueRepo)
 	fmt.Printf("Recipient: %s\n", recipient)
 
@@ -420,7 +442,7 @@ func runRemoteGit(shotPaths []string, a *mainArgs) {
 	fmt.Printf("Encrypting and pushing task %s (%d image(s))...\n", taskID, len(shotPaths))
 	err = gitqueue.SendTask(cfg, gitqueue.SendArgs{
 		TaskID:          taskID,
-		Repo:            a.repo,
+		Repo:            repo,
 		Message:         a.message,
 		ScreenshotPaths: shotPaths,
 		Recipient:       a.to,
@@ -733,6 +755,24 @@ func baseInit(slug string) *config.Config {
 	return cfg
 }
 
+// ReceiverRepo describes a git repo registered with a receiver.
+type ReceiverRepo struct {
+	Name   string `json:"name"`
+	Remote string `json:"remote,omitempty"`
+	Path   string `json:"path"`
+}
+
+// ReceiverMarker is the JSON stored in roles/recv/<hostname>.
+type ReceiverMarker struct {
+	Repos []ReceiverRepo `json:"repos,omitempty"`
+}
+
+// PeerInfo is a discovered peer with optional repo metadata.
+type PeerInfo struct {
+	Hostname string
+	Repos    []ReceiverRepo
+}
+
 // initArgs holds the parsed result of init-recv / init-send arguments.
 type initArgs struct {
 	slug    string
@@ -771,6 +811,91 @@ func parseInitArgs(args []string, cmd string) initArgs {
 	return a
 }
 
+// detectGitRepo checks whether the current directory is inside a git repo.
+// Returns the remote origin URL, the repo root path, and whether it is a repo.
+func detectGitRepo() (remote, repoPath string, ok bool) {
+	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return "", "", false
+	}
+	repoPath = strings.TrimSpace(string(out))
+	out, err = exec.Command("git", "-C", repoPath, "remote", "get-url", "origin").Output()
+	if err != nil {
+		return "", repoPath, true
+	}
+	return strings.TrimSpace(string(out)), repoPath, true
+}
+
+// remoteToSlug converts a git remote URL to an owner/repo slug.
+func remoteToSlug(remote string) string {
+	s := strings.TrimPrefix(remote, "https://github.com/")
+	s = strings.TrimPrefix(s, "git@github.com:")
+	s = strings.TrimSuffix(s, ".git")
+	return s
+}
+
+// readReceiverMarker reads and parses a receiver role marker file.
+func readReceiverMarker(cloneDir, hostname string) ReceiverMarker {
+	var marker ReceiverMarker
+	rel := fmt.Sprintf("roles/recv/%s", hostname)
+	if !gitqueue.FileExists(cloneDir, rel) {
+		return marker
+	}
+	data, err := gitqueue.ReadFile(cloneDir, rel)
+	if err != nil || len(data) == 0 {
+		return marker
+	}
+	_ = json.Unmarshal(data, &marker)
+	return marker
+}
+
+// resolveReceiverRepo looks up the recipient's role marker in the queue repo
+// and returns the repo slug/URL. Prompts if the receiver has multiple repos.
+func resolveReceiverRepo(cfg *config.Config, recipientHost string) (string, error) {
+	if cfg.Git == nil {
+		return "", fmt.Errorf("git transport not configured")
+	}
+	if err := gitqueue.EnsureCloned(cfg.Git.QueueRepo, cfg.Git.CloneDir, cfg.Git.Branch); err != nil {
+		return "", err
+	}
+	_ = gitqueue.PullRebase(cfg.Git.CloneDir, cfg.Git.Branch)
+
+	marker := readReceiverMarker(cfg.Git.CloneDir, recipientHost)
+	if len(marker.Repos) == 0 {
+		return "", fmt.Errorf("receiver %s has no repo configured; pass --repo", recipientHost)
+	}
+	if len(marker.Repos) == 1 {
+		r := marker.Repos[0]
+		if r.Remote != "" {
+			return remoteToSlug(r.Remote), nil
+		}
+		return r.Path, nil
+	}
+	if !interactive() {
+		return "", fmt.Errorf("receiver %s has %d repos; pass --repo to specify", recipientHost, len(marker.Repos))
+	}
+	fmt.Printf("\nReceiver %s has multiple repos:\n", recipientHost)
+	for i, r := range marker.Repos {
+		label := r.Name
+		if r.Remote != "" {
+			label += fmt.Sprintf("  (%s)", remoteToSlug(r.Remote))
+		}
+		fmt.Printf("  [%d] %s\n", i+1, label)
+	}
+	fmt.Print("Select repo: ")
+	reader := bufio.NewReader(os.Stdin)
+	line, _ := reader.ReadString('\n')
+	n, err := strconv.Atoi(strings.TrimSpace(line))
+	if err != nil || n < 1 || n > len(marker.Repos) {
+		return "", fmt.Errorf("invalid selection")
+	}
+	r := marker.Repos[n-1]
+	if r.Remote != "" {
+		return remoteToSlug(r.Remote), nil
+	}
+	return r.Path, nil
+}
+
 // cmdInitRecv sets up this machine as a receiver: base init + installs and
 // loads the launchd daemon so it starts processing incoming queue tasks.
 //
@@ -779,7 +904,23 @@ func parseInitArgs(args []string, cmd string) initArgs {
 func cmdInitRecv(args []string) {
 	opts := parseInitArgs(args, "init-recv")
 	cfg := baseInit(opts.slug)
-	publishRoleMarker(cfg, "recv")
+
+	// Detect if we're inside a git repo — if so, register it with this receiver.
+	var repo *ReceiverRepo
+	if remote, repoPath, ok := detectGitRepo(); ok {
+		name := filepath.Base(repoPath)
+		repo = &ReceiverRepo{
+			Name:   name,
+			Remote: remote,
+			Path:   repoPath,
+		}
+		fmt.Printf("Detected git repo: %s (%s)\n", name, repoPath)
+		if remote != "" {
+			fmt.Printf("Remote: %s\n", remote)
+		}
+	}
+
+	publishRoleMarker(cfg, "recv", repo)
 
 	fmt.Println()
 	fmt.Println("Installing daemon...")
@@ -828,21 +969,52 @@ func cmdInitRecv(args []string) {
 	fmt.Printf("Cached sender pubkey for: %s\n", selected)
 }
 
-// publishRoleMarker writes roles/<role>/<hostname> to the queue repo
-// (idempotent — no-op if the file is already there).
-func publishRoleMarker(cfg *config.Config, role string) {
+// publishRoleMarker writes roles/<role>/<hostname> to the queue repo.
+// If repo is non-nil (receiver in a git repo), the marker stores JSON with
+// the repo list so senders can discover which repos this receiver handles.
+func publishRoleMarker(cfg *config.Config, role string, repo *ReceiverRepo) {
 	if cfg.Git == nil {
 		return
 	}
 	rel := fmt.Sprintf("roles/%s/%s", role, cfg.Hostname)
-	if gitqueue.FileExists(cfg.Git.CloneDir, rel) {
+
+	if repo == nil {
+		// Simple marker (sender role or receiver not in a git repo).
+		if gitqueue.FileExists(cfg.Git.CloneDir, rel) {
+			return
+		}
+		if err := gitqueue.WriteFile(cfg.Git.CloneDir, rel, []byte("")); err != nil {
+			fmt.Fprintf(os.Stderr, "note: could not write role marker: %v\n", err)
+			return
+		}
+		msg := fmt.Sprintf("Register %s as %s", cfg.Hostname, role)
+		if err := gitqueue.CommitAndPush(cfg.Git.CloneDir, []string{rel}, msg, cfg.Git.Branch, cfg.Git.AuthorName, cfg.Git.AuthorEmail); err != nil {
+			fmt.Fprintf(os.Stderr, "note: could not push role marker: %v\n", err)
+		}
 		return
 	}
-	if err := gitqueue.WriteFile(cfg.Git.CloneDir, rel, []byte("")); err != nil {
+
+	// Read existing marker and merge the new repo in.
+	marker := readReceiverMarker(cfg.Git.CloneDir, cfg.Hostname)
+	found := false
+	for i, r := range marker.Repos {
+		if r.Path == repo.Path {
+			marker.Repos[i] = *repo
+			found = true
+			break
+		}
+	}
+	if !found {
+		marker.Repos = append(marker.Repos, *repo)
+	}
+
+	content, _ := json.MarshalIndent(marker, "", "  ")
+	content = append(content, '\n')
+	if err := gitqueue.WriteFile(cfg.Git.CloneDir, rel, content); err != nil {
 		fmt.Fprintf(os.Stderr, "note: could not write role marker: %v\n", err)
 		return
 	}
-	msg := fmt.Sprintf("Register %s as %s", cfg.Hostname, role)
+	msg := fmt.Sprintf("Register %s as %s for %s", cfg.Hostname, role, repo.Name)
 	if err := gitqueue.CommitAndPush(cfg.Git.CloneDir, []string{rel}, msg, cfg.Git.Branch, cfg.Git.AuthorName, cfg.Git.AuthorEmail); err != nil {
 		fmt.Fprintf(os.Stderr, "note: could not push role marker: %v\n", err)
 	}
@@ -854,7 +1026,7 @@ func publishRoleMarker(cfg *config.Config, role string) {
 func cmdInitSend(args []string) {
 	opts := parseInitArgs(args, "init-send")
 	cfg := baseInit(opts.slug)
-	publishRoleMarker(cfg, "send")
+	publishRoleMarker(cfg, "send", nil)
 
 	peers, _ := discoverPeers(cfg, "recv")
 
@@ -897,8 +1069,8 @@ func cmdInitSend(args []string) {
 }
 
 // discoverPeers reads roles/<role>/* from the queue repo clone and returns
-// hostnames excluding this machine's own hostname.
-func discoverPeers(cfg *config.Config, role string) ([]string, error) {
+// peer info (hostname + optional repo metadata) excluding this machine.
+func discoverPeers(cfg *config.Config, role string) ([]PeerInfo, error) {
 	if cfg.Git == nil {
 		return nil, fmt.Errorf("git transport not configured")
 	}
@@ -910,7 +1082,7 @@ func discoverPeers(cfg *config.Config, role string) ([]string, error) {
 		}
 		return nil, err
 	}
-	var out []string
+	var out []PeerInfo
 	for _, e := range entries {
 		if !e.Type().IsRegular() {
 			continue
@@ -921,9 +1093,26 @@ func discoverPeers(cfg *config.Config, role string) ([]string, error) {
 		if e.Name() == cfg.Hostname {
 			continue
 		}
-		out = append(out, e.Name())
+		pi := PeerInfo{Hostname: e.Name()}
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err == nil && len(data) > 0 {
+			var marker ReceiverMarker
+			if json.Unmarshal(data, &marker) == nil {
+				pi.Repos = marker.Repos
+			}
+		}
+		out = append(out, pi)
 	}
 	return out, nil
+}
+
+// peerHostnames extracts just the hostnames from a PeerInfo slice.
+func peerHostnames(peers []PeerInfo) []string {
+	var out []string
+	for _, p := range peers {
+		out = append(out, p.Hostname)
+	}
+	return out
 }
 
 // fetchPeerPubkey pulls the queue repo and returns pubkeys/<host>.pub.
@@ -952,11 +1141,19 @@ func fetchPeerPubkey(cfg *config.Config, host string) (string, error) {
 
 // promptSelectPeer shows a numbered menu and returns the chosen hostname,
 // or "" if skipped / invalid.
-func promptSelectPeer(role string, peers []string) string {
+func promptSelectPeer(role string, peers []PeerInfo) string {
 	labelPlural := role + "s"
 	fmt.Printf("\nRegistered %s:\n", labelPlural)
 	for i, p := range peers {
-		fmt.Printf("  [%d] %s\n", i+1, p)
+		extra := ""
+		if len(p.Repos) > 0 {
+			var names []string
+			for _, r := range p.Repos {
+				names = append(names, r.Name)
+			}
+			extra = fmt.Sprintf("  repos: %s", strings.Join(names, ", "))
+		}
+		fmt.Printf("  [%d] %s%s\n", i+1, p.Hostname, extra)
 	}
 	fmt.Printf("  [0] skip\n")
 	fmt.Printf("Select one [0]: ")
@@ -975,11 +1172,11 @@ func promptSelectPeer(role string, peers []string) string {
 		fmt.Println("(invalid selection — skipping)")
 		return ""
 	}
-	return peers[n-1]
+	return peers[n-1].Hostname
 }
 
 // printDiscoveredPeers lists peers informationally (no prompt).
-func printDiscoveredPeers(role string, peers []string) {
+func printDiscoveredPeers(role string, peers []PeerInfo) {
 	labelPlural := role + "s"
 	fmt.Printf("Registered %s:\n", labelPlural)
 	if len(peers) == 0 {
@@ -987,7 +1184,15 @@ func printDiscoveredPeers(role string, peers []string) {
 		return
 	}
 	for _, p := range peers {
-		fmt.Printf("  - %s\n", p)
+		extra := ""
+		if len(p.Repos) > 0 {
+			var names []string
+			for _, r := range p.Repos {
+				names = append(names, r.Name)
+			}
+			extra = fmt.Sprintf("  repos: %s", strings.Join(names, ", "))
+		}
+		fmt.Printf("  - %s%s\n", p.Hostname, extra)
 	}
 }
 
@@ -1002,9 +1207,17 @@ func shortRole(role string) string {
 }
 
 // emitPeersJSON prints a machine-readable choice summary.
-func emitPeersJSON(cfg *config.Config, peerRole string, peers []string) {
-	if peers == nil {
-		peers = []string{}
+func emitPeersJSON(cfg *config.Config, peerRole string, peers []PeerInfo) {
+	type jsonPeer struct {
+		Hostname string         `json:"hostname"`
+		Repos    []ReceiverRepo `json:"repos,omitempty"`
+	}
+	var jpList []jsonPeer
+	for _, p := range peers {
+		jpList = append(jpList, jsonPeer{Hostname: p.Hostname, Repos: p.Repos})
+	}
+	if jpList == nil {
+		jpList = []jsonPeer{}
 	}
 	action := "select-peer"
 	hint := fmt.Sprintf("Re-run with --peer <hostname> to proceed.")
@@ -1015,7 +1228,7 @@ func emitPeersJSON(cfg *config.Config, peerRole string, peers []string) {
 	payload := map[string]any{
 		"action":     action,
 		"role":       peerRole,
-		"peers":      peers,
+		"peers":      jpList,
 		"queue_repo": cfg.Git.QueueRepo,
 		"hint":       hint,
 	}
@@ -1051,17 +1264,26 @@ func cmdPeers() {
 	}
 	_ = gitqueue.PullRebase(cfg.Git.CloneDir, cfg.Git.Branch)
 
-	listRole := func(role string) []string {
+	listRole := func(role string) []PeerInfo {
 		dir := filepath.Join(cfg.Git.CloneDir, "roles", role)
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			return nil
 		}
-		var out []string
+		var out []PeerInfo
 		for _, e := range entries {
-			if e.Type().IsRegular() && !strings.HasPrefix(e.Name(), ".") {
-				out = append(out, e.Name())
+			if !e.Type().IsRegular() || strings.HasPrefix(e.Name(), ".") {
+				continue
 			}
+			pi := PeerInfo{Hostname: e.Name()}
+			data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+			if err == nil && len(data) > 0 {
+				var m ReceiverMarker
+				if json.Unmarshal(data, &m) == nil {
+					pi.Repos = m.Repos
+				}
+			}
+			out = append(out, pi)
 		}
 		return out
 	}
@@ -1075,12 +1297,19 @@ func cmdPeers() {
 	if len(recvs) == 0 {
 		fmt.Println("  (none registered)")
 	}
-	for _, h := range recvs {
+	for _, p := range recvs {
 		marker := ""
-		if h == cfg.Hostname {
+		if p.Hostname == cfg.Hostname {
 			marker = "  ← this machine"
 		}
-		fmt.Printf("  %s%s\n", h, marker)
+		fmt.Printf("  %s%s\n", p.Hostname, marker)
+		for _, r := range p.Repos {
+			slug := r.Name
+			if r.Remote != "" {
+				slug = remoteToSlug(r.Remote)
+			}
+			fmt.Printf("    repo: %s  (%s)\n", slug, r.Path)
+		}
 	}
 
 	fmt.Println()
@@ -1088,12 +1317,12 @@ func cmdPeers() {
 	if len(sends) == 0 {
 		fmt.Println("  (none registered)")
 	}
-	for _, h := range sends {
+	for _, p := range sends {
 		marker := ""
-		if h == cfg.Hostname {
+		if p.Hostname == cfg.Hostname {
 			marker = "  ← this machine"
 		}
-		fmt.Printf("  %s%s\n", h, marker)
+		fmt.Printf("  %s%s\n", p.Hostname, marker)
 	}
 }
 
