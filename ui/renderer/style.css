@@ -30,6 +30,36 @@ header h1 {
   color: #888;
 }
 
+#api-key-section {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+#api-key-input {
+  background: #1a1a2e;
+  border: 1px solid #0f3460;
+  color: #e0e0e0;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  width: 260px;
+}
+
+#api-key-save {
+  background: #e94560;
+  color: #fff;
+  border: none;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+#api-status {
+  font-size: 12px;
+}
+
 #grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -49,6 +79,11 @@ header h1 {
 
 .card:hover {
   border-color: #e94560;
+}
+
+.card-processing {
+  border-color: #0984e3;
+  animation: border-pulse 1.5s infinite;
 }
 
 .card img {
@@ -88,6 +123,28 @@ header h1 {
 .badge.done       { background: #00b894; }
 .badge.error      { background: #d63031; }
 
+.send-btn {
+  position: absolute;
+  bottom: 32px;
+  right: 8px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: #e94560;
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.card:hover .send-btn { opacity: 1; }
+.send-btn:hover { background: #c0392b; }
+
 .delete-btn {
   position: absolute;
   top: 8px;
@@ -110,7 +167,28 @@ header h1 {
 .card:hover .delete-btn { opacity: 1; }
 .delete-btn:hover { background: #d63031; }
 
+.toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 13px;
+  z-index: 100;
+  transition: opacity 0.3s;
+}
+
+.toast.hidden { opacity: 0; pointer-events: none; }
+.toast-success { background: #00b894; color: #fff; }
+.toast-error { background: #d63031; color: #fff; }
+
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
+}
+
+@keyframes border-pulse {
+  0%, 100% { border-color: #0984e3; }
+  50% { border-color: #0f3460; }
 }

@@ -157,10 +157,17 @@ app.whenReady().then(() => {
   repoRoot = findRepoRoot();
   xmuggleDir = path.join(repoRoot, '.xmuggle');
 
+  const api = require('./api');
+
   ipcMain.handle('get-images', () => getImages());
   ipcMain.handle('delete-image', (_, imgPath) => {
     try { fs.unlinkSync(imgPath); } catch {}
     return getImages();
+  });
+  ipcMain.handle('has-api-key', () => api.hasApiKey());
+  ipcMain.handle('set-api-key', (_, key) => { api.setApiKey(key); return true; });
+  ipcMain.handle('send-to-api', async (_, imagePaths, message) => {
+    return api.analyzeAndFix({ imagePaths, repoRoot, message });
   });
 
   createWindow();
