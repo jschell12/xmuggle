@@ -37,22 +37,17 @@ for bin in xmuggle xmuggled; do
   echo "  $BIN_DIR/$bin"
 done
 
-# Ensure ~/.local/bin is on PATH in shell profile
-if ! is_on_path "$BIN_DIR"; then
-  PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
-  # Add to all shell rc files (create if missing)
-  for RC_FILE in "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.bashrc" "$HOME/.bash_profile"; do
-    if ! grep -qF '.local/bin' "$RC_FILE" 2>/dev/null; then
-      echo "" >> "$RC_FILE"
-      echo '# Added by xmuggle install' >> "$RC_FILE"
-      echo "$PATH_LINE" >> "$RC_FILE"
-      echo "Added ~/.local/bin to PATH in $RC_FILE"
-    fi
-  done
-
-  # Also export for the current session
-  export PATH="$BIN_DIR:$PATH"
-fi
+# Ensure ~/.local/bin is in all shell profiles (idempotent)
+PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
+for RC_FILE in "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.bashrc" "$HOME/.bash_profile"; do
+  if ! grep -qF '.local/bin' "$RC_FILE" 2>/dev/null; then
+    echo "" >> "$RC_FILE"
+    echo '# Added by xmuggle install' >> "$RC_FILE"
+    echo "$PATH_LINE" >> "$RC_FILE"
+    echo "Added ~/.local/bin to PATH in $RC_FILE"
+  fi
+done
+export PATH="$BIN_DIR:$PATH"
 
 # Claude Code skill
 if [[ -d "$HOME/.claude" ]]; then
