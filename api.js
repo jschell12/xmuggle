@@ -65,7 +65,7 @@ function mediaType(filePath) {
 
 function repoURL(slug) {
   if (slug.startsWith('http') || slug.startsWith('git@')) return slug;
-  return `https://github.com/${slug}.git`;
+  return `git@github.com:${slug}.git`;
 }
 
 function getRepoContext(repoRoot) {
