@@ -111,9 +111,22 @@ async function sendImage(img) {
 async function initApiKey() {
   const hasKey = await window.xmuggle.hasApiKey();
   if (hasKey) {
-    apiStatus.textContent = 'API key set';
-    apiStatus.style.color = '#00b894';
+    apiStatus.innerHTML = '';
+    const label = document.createElement('span');
+    label.textContent = 'API key set ';
+    label.style.color = '#00b894';
+    const resetBtn = document.createElement('button');
+    resetBtn.className = 'link-btn';
+    resetBtn.style.fontSize = '11px';
+    resetBtn.textContent = 'Reset';
+    resetBtn.addEventListener('click', async () => {
+      await window.xmuggle.resetApiKey();
+      initApiKey();
+    });
+    apiStatus.appendChild(label);
+    apiStatus.appendChild(resetBtn);
     apiKeySection.style.display = 'none';
+    apiStatus.style.display = '';
   } else {
     apiKeySection.style.display = 'flex';
     apiStatus.style.display = 'none';

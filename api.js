@@ -47,6 +47,10 @@ function setApiKey(key) {
   fs.writeFileSync(API_KEY_FILE, key.trim() + '\n', { mode: 0o600 });
 }
 
+function resetApiKey() {
+  try { fs.unlinkSync(API_KEY_FILE); } catch {}
+}
+
 function hasApiKey() {
   return !!getApiKey();
 }
@@ -198,4 +202,4 @@ async function analyzeAndFix({ imagePaths, repoRoot, message }) {
   };
 }
 
-module.exports = { getApiKey, setApiKey, hasApiKey, analyzeAndFix };
+module.exports = { getApiKey, setApiKey, resetApiKey, hasApiKey, analyzeAndFix };

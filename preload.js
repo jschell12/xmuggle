@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('xmuggle', {
   deleteImage: (imgPath) => ipcRenderer.invoke('delete-image', imgPath),
   hasApiKey: () => ipcRenderer.invoke('has-api-key'),
   setApiKey: (key) => ipcRenderer.invoke('set-api-key', key),
+  resetApiKey: () => ipcRenderer.invoke('reset-api-key'),
   sendToApi: (imagePaths, message) => ipcRenderer.invoke('send-to-api', imagePaths, message),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   onImagesUpdated: (callback) => {
