@@ -102,6 +102,7 @@ function promptAndSend(img) {
     <div class="modal">
       <div class="modal-title">Send to Claude</div>
       <div class="modal-subtitle">${img.name}</div>
+      <input type="text" id="repo-input" placeholder="owner/repo (e.g. jschell12/ai-enhance)" spellcheck="false">
       <textarea id="context-input" placeholder="What's wrong? What should be fixed?" rows="3"></textarea>
       <div class="modal-actions">
         <button id="modal-cancel" class="link-btn">Cancel</button>
@@ -111,36 +112,43 @@ function promptAndSend(img) {
   `;
   document.body.appendChild(modal);
 
-  const input = document.getElementById('context-input');
-  input.focus();
+  const repoInput = document.getElementById('repo-input');
+  const contextInput = document.getElementById('context-input');
+  repoInput.focus();
 
   document.getElementById('modal-cancel').addEventListener('click', () => modal.remove());
   modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
 
   const doSend = () => {
-    const message = input.value.trim();
+    const repo = repoInput.value.trim();
+    if (!repo) { repoInput.focus(); return; }
+    const message = contextInput.value.trim();
     modal.remove();
-    sendImage(img, message);
+    sendImage(img, repo, message);
   };
 
   document.getElementById('modal-send').addEventListener('click', doSend);
-  input.addEventListener('keydown', (e) => {
+  contextInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) doSend();
+  });
+  repoInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') contextInput.focus();
   });
 }
 
-async function sendImage(img, message) {
+async function sendImage(img, repo, message) {
   processingSet.add(img.path);
   const images = await window.xmuggle.getImages();
   render(images);
 
   try {
-    const result = await window.xmuggle.sendToApi([img.path], message || '');
+    const result = await window.xmuggle.sendToApi([img.path], repo, message || '');
     processingSet.delete(img.path);
 
     if (result.status === 'success') {
       await window.xmuggle.deleteImage(img.path);
-      showToast(`Fixed: ${result.summary}`, false);
+      const prInfo = result.prUrl ? ` PR: ${result.prUrl}` : '';
+      showToast(`Fixed: ${result.summary}${prInfo}`, false);
     } else if (result.status === 'no_changes') {
       showToast(result.summary, false);
     } else {

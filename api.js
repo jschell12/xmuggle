@@ -2,8 +2,10 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
+const crypto = require('crypto');
 
 const API_KEY_FILE = path.join(os.homedir(), '.xmuggle', 'api-key');
+const WORK_DIR = path.join(os.homedir(), '.xmuggle', 'work');
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-sonnet-4-20250514';
 const MAX_TOKENS = 8192;
@@ -61,8 +63,12 @@ function mediaType(filePath) {
   return types[ext] || 'image/png';
 }
 
+function repoURL(slug) {
+  if (slug.startsWith('http') || slug.startsWith('git@')) return slug;
+  return `https://github.com/${slug}.git`;
+}
+
 function getRepoContext(repoRoot) {
-  // Get file listing
   let files;
   try {
     files = execSync('git ls-files', { cwd: repoRoot, encoding: 'utf8', maxBuffer: 1024 * 1024 }).trim().split('\n');
@@ -70,11 +76,10 @@ function getRepoContext(repoRoot) {
     files = [];
   }
 
-  // Read small source files for context (skip binaries, large files, node_modules)
   const skipDirs = ['node_modules', 'vendor', '.git', 'bin', 'dist', 'build'];
   const sourceExts = ['.js', '.ts', '.tsx', '.jsx', '.go', '.py', '.css', '.html', '.json', '.md', '.yaml', '.yml', '.toml'];
-  const maxFileSize = 50_000; // 50KB
-  const maxTotalSize = 200_000; // 200KB
+  const maxFileSize = 50_000;
+  const maxTotalSize = 200_000;
 
   let totalSize = 0;
   const fileContents = [];
@@ -97,9 +102,25 @@ function getRepoContext(repoRoot) {
   return { files, fileContents };
 }
 
-async function analyzeAndFix({ imagePaths, repoRoot, message }) {
+async function analyzeAndFix({ imagePaths, repo, message }) {
   const apiKey = getApiKey();
   if (!apiKey) throw new Error('No API key. Set ANTHROPIC_API_KEY or save to ~/.xmuggle/api-key');
+  if (!repo) throw new Error('No repo specified');
+
+  // Clone repo to temp dir
+  fs.mkdirSync(WORK_DIR, { recursive: true });
+  const id = crypto.randomBytes(4).toString('hex');
+  const cloneDir = path.join(WORK_DIR, `${repo.replace(/\//g, '-')}-${id}`);
+  const branch = `xmuggle-fix-${id}`;
+
+  try {
+    execSync(`git clone --depth 1 ${repoURL(repo)} "${cloneDir}"`, { encoding: 'utf8', stdio: 'pipe' });
+  } catch (e) {
+    throw new Error(`Clone failed: ${e.stderr || e.message}`);
+  }
+
+  // Create branch
+  execSync(`git checkout -b ${branch}`, { cwd: cloneDir, stdio: 'pipe' });
 
   // Build image blocks
   const imageBlocks = imagePaths.map(p => ({
@@ -112,8 +133,8 @@ async function analyzeAndFix({ imagePaths, repoRoot, message }) {
   }));
 
   // Gather repo context
-  const ctx = getRepoContext(repoRoot);
-  let contextText = `Repository: ${repoRoot}\n\nFiles in repo:\n${ctx.files.join('\n')}\n\n`;
+  const ctx = getRepoContext(cloneDir);
+  let contextText = `Repository: ${repo}\n\nFiles in repo:\n${ctx.files.join('\n')}\n\n`;
 
   for (const f of ctx.fileContents) {
     contextText += `--- ${f.path} ---\n${f.content}\n\n`;
@@ -149,13 +170,14 @@ async function analyzeAndFix({ imagePaths, repoRoot, message }) {
   });
 
   if (!resp.ok) {
+    fs.rmSync(cloneDir, { recursive: true, force: true });
     const err = await resp.text();
     throw new Error(`API error ${resp.status}: ${err}`);
   }
 
   const result = await resp.json();
 
-  // Extract edits from tool_use blocks
+  // Extract edits
   const edits = [];
   let summary = '';
 
@@ -169,34 +191,57 @@ async function analyzeAndFix({ imagePaths, repoRoot, message }) {
   }
 
   if (edits.length === 0) {
+    fs.rmSync(cloneDir, { recursive: true, force: true });
     return { status: 'no_changes', summary: summary || 'No changes needed.' };
   }
 
   // Apply edits
   const changedFiles = [];
   for (const edit of edits) {
-    const fullPath = path.join(repoRoot, edit.path);
+    const fullPath = path.join(cloneDir, edit.path);
     fs.mkdirSync(path.dirname(fullPath), { recursive: true });
     fs.writeFileSync(fullPath, edit.content);
     changedFiles.push(edit.path);
   }
 
-  // Commit
+  // Commit, push, create PR
   const commitSummary = edits.map(e => e.summary).join('; ');
   const commitMsg = `fix: ${commitSummary}`;
+  let prUrl = '';
 
   try {
     for (const f of changedFiles) {
-      execSync(`git add -- "${f}"`, { cwd: repoRoot });
+      execSync(`git add -- "${f}"`, { cwd: cloneDir, stdio: 'pipe' });
     }
-    execSync(`git commit -m "${commitMsg.replace(/"/g, '\\"')}"`, { cwd: repoRoot });
+    execSync(`git commit -m "${commitMsg.replace(/"/g, '\\"')}"`, { cwd: cloneDir, stdio: 'pipe' });
+    execSync(`git push -u origin ${branch}`, { cwd: cloneDir, stdio: 'pipe' });
+
+    // Create PR via gh CLI
+    const prBody = `## Screenshot fix\n\n${summary}\n\n## Changes\n${changedFiles.map(f => '- ' + f).join('\n')}\n\n---\nAutomated fix by xmuggle`;
+    const prOutput = execSync(
+      `gh pr create --title "${commitMsg.replace(/"/g, '\\"')}" --body "${prBody.replace(/"/g, '\\"')}"`,
+      { cwd: cloneDir, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+    ).trim();
+    // gh pr create prints the URL as the last line
+    const lines = prOutput.split('\n');
+    prUrl = lines[lines.length - 1];
   } catch (e) {
-    return { status: 'commit_failed', summary: `Edits applied but commit failed: ${e.message}`, changedFiles };
+    // Clean up but still report what happened
+    fs.rmSync(cloneDir, { recursive: true, force: true });
+    return {
+      status: 'push_failed',
+      summary: `Edits applied but push/PR failed: ${e.stderr || e.message}`,
+      changedFiles,
+    };
   }
+
+  // Clean up clone
+  fs.rmSync(cloneDir, { recursive: true, force: true });
 
   return {
     status: 'success',
     summary: commitSummary,
+    prUrl,
     changedFiles,
     analysisText: summary,
   };

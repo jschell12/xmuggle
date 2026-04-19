@@ -168,8 +168,8 @@ app.whenReady().then(() => {
   ipcMain.handle('set-api-key', (_, key) => { api.setApiKey(key); return true; });
   ipcMain.handle('reset-api-key', () => { api.resetApiKey(); return true; });
   ipcMain.handle('open-external', (_, url) => shell.openExternal(url));
-  ipcMain.handle('send-to-api', async (_, imagePaths, message) => {
-    return api.analyzeAndFix({ imagePaths, repoRoot, message });
+  ipcMain.handle('send-to-api', async (_, imagePaths, repo, message) => {
+    return api.analyzeAndFix({ imagePaths, repo, message });
   });
 
   createWindow();
