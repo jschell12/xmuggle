@@ -7,7 +7,7 @@ const crypto = require('crypto');
 const API_KEY_FILE = path.join(os.homedir(), '.xmuggle', 'api-key');
 const WORK_DIR = path.join(os.homedir(), '.xmuggle', 'work');
 const API_URL = 'https://api.anthropic.com/v1/messages';
-const MODEL = 'claude-sonnet-4-20250514';
+const MODEL = 'claude-3-5-sonnet-20241022';
 const MAX_TOKENS = 8192;
 
 const SYSTEM_PROMPT = `You are a code fix agent. You analyze screenshots showing bugs, UI issues, or errors, and fix the code.
@@ -181,7 +181,7 @@ async function analyzeAndFix({ imagePaths, projectPath, message, onProgress }) {
   const resp = await fetch(API_URL, {
     method: 'POST',
     headers: {
-      'x-api-key': apiKey,
+      'Authorization': `Bearer ${apiKey}`,
       'anthropic-version': '2023-06-01',
       'content-type': 'application/json',
     },
