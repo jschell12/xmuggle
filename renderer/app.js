@@ -18,6 +18,7 @@ const BADGE_LABELS = {
 };
 
 let projects = [];
+let activeProject = null; // path of selected project, or null for "all"
 const processingSet = new Set();
 
 // ── Toast ──
@@ -44,11 +45,32 @@ async function loadProjects() {
 
 function renderProjectTabs() {
   projectTabs.innerHTML = '';
+
+  // "All" tab
+  const allTab = document.createElement('div');
+  allTab.className = 'project-tab' + (activeProject === null ? ' project-tab-active' : '');
+  allTab.textContent = 'All';
+  allTab.addEventListener('click', () => {
+    activeProject = null;
+    renderProjectTabs();
+    refresh();
+  });
+  projectTabs.appendChild(allTab);
+
   for (const p of projects) {
     const tab = document.createElement('div');
-    tab.className = 'project-tab';
-    tab.textContent = p.name;
+    tab.className = 'project-tab' + (activeProject === p.path ? ' project-tab-active' : '');
     tab.title = p.path;
+
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = p.name;
+    tab.appendChild(nameSpan);
+
+    tab.addEventListener('click', () => {
+      activeProject = activeProject === p.path ? null : p.path;
+      renderProjectTabs();
+      refresh();
+    });
 
     const removeBtn = document.createElement('button');
     removeBtn.className = 'project-remove';
@@ -56,7 +78,9 @@ function renderProjectTabs() {
     removeBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       await window.xmuggle.removeProject(p.path);
+      if (activeProject === p.path) activeProject = null;
       await loadProjects();
+      refresh();
     });
     tab.appendChild(removeBtn);
     projectTabs.appendChild(tab);
@@ -78,13 +102,19 @@ addProjectBtn.addEventListener('click', async () => {
 function render(images) {
   grid.innerHTML = '';
 
-  const total = images.length;
-  const pending = images.filter(i => i.status === 'new').length;
-  const inProgress = images.filter(i => i.status === 'processing' || processingSet.has(i.path)).length;
-  const done = images.filter(i => i.status === 'done').length;
-  count.textContent = `${total} images \u2022 ${pending} new \u2022 ${inProgress} in progress \u2022 ${done} done`;
+  // Filter by active project
+  const filtered = activeProject
+    ? images.filter(i => i.projectPath === activeProject || (!i.projectPath && i.status === 'new'))
+    : images;
 
-  for (const img of images) {
+  const total = filtered.length;
+  const pending = filtered.filter(i => i.status === 'new').length;
+  const inProgress = filtered.filter(i => i.status === 'processing' || processingSet.has(i.path)).length;
+  const done = filtered.filter(i => i.status === 'done').length;
+  const label = activeProject ? activeProject.split('/').pop() : 'all projects';
+  count.textContent = `${total} images \u2022 ${pending} new \u2022 ${inProgress} in progress \u2022 ${done} done \u2022 ${label}`;
+
+  for (const img of filtered) {
     const isProcessing = processingSet.has(img.path);
     const card = document.createElement('div');
     card.className = 'card' + (isProcessing ? ' card-processing' : '');
@@ -151,7 +181,8 @@ function promptAndSend(img) {
 
   let projectOptions = '';
   for (const p of projects) {
-    projectOptions += `<option value="${p.path}">${p.name}</option>`;
+    const selected = (activeProject === p.path) ? ' selected' : '';
+    projectOptions += `<option value="${p.path}"${selected}>${p.name}</option>`;
   }
   if (projects.length === 0) {
     projectOptions = '<option value="">No projects — add one first</option>';
