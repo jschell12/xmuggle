@@ -9,6 +9,9 @@ contextBridge.exposeInMainWorld('xmuggle', {
   hasApiKey: () => ipcRenderer.invoke('has-api-key'),
   setApiKey: (key) => ipcRenderer.invoke('set-api-key', key),
   resetApiKey: () => ipcRenderer.invoke('reset-api-key'),
+  hasGhToken: () => ipcRenderer.invoke('has-gh-token'),
+  setGhToken: (token) => ipcRenderer.invoke('set-gh-token', token),
+  resetGhToken: () => ipcRenderer.invoke('reset-gh-token'),
   sendToApi: (imagePaths, projectPath, message) => ipcRenderer.invoke('send-to-api', imagePaths, projectPath, message),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   onImagesUpdated: (callback) => {

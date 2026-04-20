@@ -4,6 +4,10 @@ const apiKeySection = document.getElementById('api-key-section');
 const apiKeyInput = document.getElementById('api-key-input');
 const apiKeySave = document.getElementById('api-key-save');
 const apiStatus = document.getElementById('api-status');
+const ghTokenSection = document.getElementById('gh-token-section');
+const ghTokenInput = document.getElementById('gh-token-input');
+const ghTokenSave = document.getElementById('gh-token-save');
+const ghStatus = document.getElementById('gh-status');
 const toast = document.getElementById('toast');
 const projectTabs = document.getElementById('project-tabs');
 const addProjectBtn = document.getElementById('add-project');
@@ -320,6 +324,46 @@ apiKeyInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') apiKeySave.click();
 });
 
+// ── GitHub Token ──
+
+async function initGhToken() {
+  const hasToken = await window.xmuggle.hasGhToken();
+  if (hasToken) {
+    ghStatus.innerHTML = '';
+    const label = document.createElement('span');
+    label.textContent = 'GitHub PAT set ';
+    label.style.color = '#00b894';
+    const resetBtn = document.createElement('button');
+    resetBtn.className = 'link-btn';
+    resetBtn.style.fontSize = '11px';
+    resetBtn.textContent = 'Reset';
+    resetBtn.addEventListener('click', async () => {
+      await window.xmuggle.resetGhToken();
+      initGhToken();
+    });
+    ghStatus.appendChild(label);
+    ghStatus.appendChild(resetBtn);
+    ghTokenSection.style.display = 'none';
+    ghStatus.style.display = '';
+  } else {
+    ghTokenSection.style.display = 'flex';
+    ghStatus.style.display = 'none';
+  }
+}
+
+ghTokenSave.addEventListener('click', async () => {
+  const token = ghTokenInput.value.trim();
+  if (!token) return;
+  await window.xmuggle.setGhToken(token);
+  ghTokenInput.value = '';
+  initGhToken();
+  showToast('GitHub PAT saved', false);
+});
+
+ghTokenInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') ghTokenSave.click();
+});
+
 // ── Init ──
 
 async function refresh() {
@@ -344,5 +388,6 @@ window.xmuggle.onTaskProgress((imgPath, msg) => {
   }
 });
 initApiKey();
+initGhToken();
 loadProjects();
 refresh();

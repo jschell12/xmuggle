@@ -30,23 +30,23 @@ header h1 {
   color: #888;
 }
 
-#api-key-section {
+#api-key-section, #gh-token-section {
   display: flex;
   gap: 6px;
   align-items: center;
 }
 
-#api-key-input {
+#api-key-input, #gh-token-input {
   background: #1a1a2e;
   border: 1px solid #0f3460;
   color: #e0e0e0;
   padding: 4px 8px;
   border-radius: 4px;
   font-size: 12px;
-  width: 260px;
+  width: 200px;
 }
 
-#api-key-save {
+#api-key-save, #gh-token-save {
   background: #e94560;
   color: #fff;
   border: none;

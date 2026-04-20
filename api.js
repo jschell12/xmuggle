@@ -5,6 +5,7 @@ const { execSync } = require('child_process');
 const crypto = require('crypto');
 
 const API_KEY_FILE = path.join(os.homedir(), '.xmuggle', 'api-key');
+const GH_TOKEN_FILE = path.join(os.homedir(), '.xmuggle', 'gh-token');
 const WORK_DIR = path.join(os.homedir(), '.xmuggle', 'work');
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-sonnet-4-20250514';
@@ -57,6 +58,41 @@ function hasApiKey() {
   return !!getApiKey();
 }
 
+function getGhToken() {
+  if (process.env.GH_TOKEN) return process.env.GH_TOKEN;
+  if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
+  try {
+    return fs.readFileSync(GH_TOKEN_FILE, 'utf8').trim();
+  } catch {
+    return null;
+  }
+}
+
+function setGhToken(token) {
+  const dir = path.dirname(GH_TOKEN_FILE);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(GH_TOKEN_FILE, token.trim() + '\n', { mode: 0o600 });
+}
+
+function resetGhToken() {
+  try { fs.unlinkSync(GH_TOKEN_FILE); } catch {}
+}
+
+function hasGhToken() {
+  return !!getGhToken();
+}
+
+function gitEnv() {
+  const token = getGhToken();
+  if (!token) return process.env;
+  return {
+    ...process.env,
+    GH_TOKEN: token,
+    GIT_ASKPASS: 'echo',
+    GIT_TERMINAL_PROMPT: '0',
+  };
+}
+
 function mediaType(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   const types = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
@@ -65,6 +101,8 @@ function mediaType(filePath) {
 
 function repoURL(slug) {
   if (slug.startsWith('http') || slug.startsWith('git@')) return slug;
+  const token = getGhToken();
+  if (token) return `https://x-access-token:${token}@github.com/${slug}.git`;
   return `git@github.com:${slug}.git`;
 }
 
@@ -127,7 +165,7 @@ async function analyzeAndFix({ imagePaths, projectPath, message, onProgress }) {
 
   log(`Cloning ${repo} (shallow)…`);
   try {
-    execSync(`git clone --depth 1 ${repoURL(repo)} "${cloneDir}"`, { encoding: 'utf8', stdio: 'pipe' });
+    execSync(`git clone --depth 1 ${repoURL(repo)} "${cloneDir}"`, { encoding: 'utf8', stdio: 'pipe', env: gitEnv() });
   } catch (e) {
     throw new Error(`Clone failed: ${e.stderr || e.message}`);
   }
@@ -240,14 +278,14 @@ async function analyzeAndFix({ imagePaths, projectPath, message, onProgress }) {
     execSync(`git commit -m "${commitMsg.replace(/"/g, '\\"')}"`, { cwd: cloneDir, stdio: 'pipe' });
 
     log(`Pushing branch ${branch}…`);
-    execSync(`git push -u origin ${branch}`, { cwd: cloneDir, stdio: 'pipe' });
+    execSync(`git push -u origin ${branch}`, { cwd: cloneDir, stdio: 'pipe', env: gitEnv() });
 
     // Create PR via gh CLI
     log('Creating pull request…');
     const prBody = `## Screenshot fix\n\n${summary}\n\n## Changes\n${changedFiles.map(f => '- ' + f).join('\n')}\n\n---\nAutomated fix by xmuggle`;
     const prOutput = execSync(
       `gh pr create --title "${commitMsg.replace(/"/g, '\\"')}" --body "${prBody.replace(/"/g, '\\"')}"`,
-      { cwd: cloneDir, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+      { cwd: cloneDir, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], env: gitEnv() }
     ).trim();
     // gh pr create prints the URL as the last line
     const lines = prOutput.split('\n');
@@ -278,4 +316,4 @@ async function analyzeAndFix({ imagePaths, projectPath, message, onProgress }) {
   };
 }
 
-module.exports = { getApiKey, setApiKey, resetApiKey, hasApiKey, analyzeAndFix };
+module.exports = { getApiKey, setApiKey, resetApiKey, hasApiKey, getGhToken, setGhToken, resetGhToken, hasGhToken, analyzeAndFix };

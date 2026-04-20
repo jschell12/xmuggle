@@ -173,6 +173,11 @@ app.whenReady().then(() => {
   ipcMain.handle('has-api-key', () => api.hasApiKey());
   ipcMain.handle('set-api-key', (_, key) => { api.setApiKey(key); return true; });
   ipcMain.handle('reset-api-key', () => { api.resetApiKey(); return true; });
+
+  // GitHub token
+  ipcMain.handle('has-gh-token', () => api.hasGhToken());
+  ipcMain.handle('set-gh-token', (_, token) => { api.setGhToken(token); return true; });
+  ipcMain.handle('reset-gh-token', () => { api.resetGhToken(); return true; });
   ipcMain.handle('open-external', (_, url) => shell.openExternal(url));
 
   // Send
