@@ -20,6 +20,7 @@ const BADGE_LABELS = {
 let projects = [];
 let activeProject = null; // path of selected project, or null for "all"
 const processingSet = new Set();
+const progressLogs = {}; // imgPath -> [messages]
 
 // ── Toast ──
 
@@ -138,6 +139,21 @@ function render(images) {
       card.appendChild(projLabel);
     }
 
+    // Progress log
+    if (isProcessing && progressLogs[img.path] && progressLogs[img.path].length > 0) {
+      const logEl = document.createElement('div');
+      logEl.className = 'progress-log';
+      logEl.id = `log-${CSS.escape(img.path)}`;
+      for (const msg of progressLogs[img.path]) {
+        const line = document.createElement('div');
+        line.className = 'progress-line';
+        line.textContent = msg;
+        logEl.appendChild(line);
+      }
+      card.appendChild(logEl);
+      requestAnimationFrame(() => { logEl.scrollTop = logEl.scrollHeight; });
+    }
+
     // Send button
     if (!isProcessing && status !== 'done') {
       const sendBtn = document.createElement('button');
@@ -230,6 +246,7 @@ function promptAndSend(img) {
 
 async function sendImage(img, projectPath, message) {
   processingSet.add(img.path);
+  progressLogs[img.path] = [];
   const images = await window.xmuggle.getImages();
   render(images);
 
@@ -251,6 +268,7 @@ async function sendImage(img, projectPath, message) {
     showToast(`Error: ${err.message}`, true);
   }
 
+  delete progressLogs[img.path];
   const updated = await window.xmuggle.getImages();
   render(updated);
 }
@@ -310,6 +328,21 @@ async function refresh() {
 }
 
 window.xmuggle.onImagesUpdated((images) => render(images));
+window.xmuggle.onTaskProgress((imgPath, msg) => {
+  if (!progressLogs[imgPath]) progressLogs[imgPath] = [];
+  progressLogs[imgPath].push(msg);
+  // Update the log element in-place if it exists, otherwise re-render
+  const logEl = document.getElementById(`log-${CSS.escape(imgPath)}`);
+  if (logEl) {
+    const line = document.createElement('div');
+    line.className = 'progress-line';
+    line.textContent = msg;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+  } else {
+    refresh();
+  }
+});
 initApiKey();
 loadProjects();
 refresh();

@@ -172,15 +172,20 @@ app.whenReady().then(() => {
   ipcMain.handle('open-external', (_, url) => shell.openExternal(url));
 
   // Send
-  ipcMain.handle('send-to-api', async (_, imagePaths, projectPath, message) => {
+  ipcMain.handle('send-to-api', async (event, imagePaths, projectPath, message) => {
     const imgPath = imagePaths[0];
     const taskId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const win = BrowserWindow.fromWebContents(event.sender);
 
     // Mark as processing
     updateTaskStatus(imgPath, projectPath, taskId, 'processing');
 
+    const onProgress = (msg) => {
+      try { win.webContents.send('task-progress', imgPath, msg); } catch {}
+    };
+
     try {
-      const result = await api.analyzeAndFix({ imagePaths, projectPath, message });
+      const result = await api.analyzeAndFix({ imagePaths, projectPath, message, onProgress });
       if (result.status === 'success') {
         updateTaskStatus(imgPath, projectPath, taskId, 'done', result.prUrl);
       } else {

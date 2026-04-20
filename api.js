@@ -102,12 +102,14 @@ function getRepoContext(repoRoot) {
   return { files, fileContents };
 }
 
-async function analyzeAndFix({ imagePaths, projectPath, message }) {
+async function analyzeAndFix({ imagePaths, projectPath, message, onProgress }) {
+  const log = onProgress || (() => {});
   const apiKey = getApiKey();
   if (!apiKey) throw new Error('No API key. Set ANTHROPIC_API_KEY or save to ~/.xmuggle/api-key');
   if (!projectPath) throw new Error('No project specified');
 
   // Derive repo slug from project's git remote
+  log('Resolving repo from git remote…');
   let repo;
   try {
     const remote = execSync('git remote get-url origin', { cwd: projectPath, encoding: 'utf8' }).trim();
@@ -115,6 +117,7 @@ async function analyzeAndFix({ imagePaths, projectPath, message }) {
   } catch {
     repo = path.basename(projectPath);
   }
+  log(`Repo: ${repo}`);
 
   // Clone repo to temp dir
   fs.mkdirSync(WORK_DIR, { recursive: true });
@@ -122,16 +125,20 @@ async function analyzeAndFix({ imagePaths, projectPath, message }) {
   const cloneDir = path.join(WORK_DIR, `${repo.replace(/\//g, '-')}-${id}`);
   const branch = `xmuggle-fix-${id}`;
 
+  log(`Cloning ${repo} (shallow)…`);
   try {
     execSync(`git clone --depth 1 ${repoURL(repo)} "${cloneDir}"`, { encoding: 'utf8', stdio: 'pipe' });
   } catch (e) {
     throw new Error(`Clone failed: ${e.stderr || e.message}`);
   }
+  log('Clone complete');
 
   // Create branch
+  log(`Creating branch ${branch}…`);
   execSync(`git checkout -b ${branch}`, { cwd: cloneDir, stdio: 'pipe' });
 
   // Build image blocks
+  log(`Encoding ${imagePaths.length} image(s)…`);
   const imageBlocks = imagePaths.map(p => ({
     type: 'image',
     source: {
@@ -142,7 +149,9 @@ async function analyzeAndFix({ imagePaths, projectPath, message }) {
   }));
 
   // Gather repo context
+  log('Gathering repo context (file list + source files)…');
   const ctx = getRepoContext(cloneDir);
+  log(`Found ${ctx.files.length} tracked files, reading ${ctx.fileContents.length} source files`);
   let contextText = `Repository: ${repo}\n\nFiles in repo:\n${ctx.files.join('\n')}\n\n`;
 
   for (const f of ctx.fileContents) {
@@ -156,6 +165,7 @@ async function analyzeAndFix({ imagePaths, projectPath, message }) {
   contextText += '\nAnalyze the screenshot(s) and fix the issue using the edit_file tool.';
 
   // Call API
+  log(`Calling Claude API (${MODEL})…`);
   const body = {
     model: MODEL,
     max_tokens: MAX_TOKENS,
@@ -184,6 +194,7 @@ async function analyzeAndFix({ imagePaths, projectPath, message }) {
     throw new Error(`API error ${resp.status}: ${err}`);
   }
 
+  log('API response received, parsing…');
   const result = await resp.json();
 
   // Extract edits
@@ -200,17 +211,20 @@ async function analyzeAndFix({ imagePaths, projectPath, message }) {
   }
 
   if (edits.length === 0) {
+    log('No edits returned — cleaning up');
     fs.rmSync(cloneDir, { recursive: true, force: true });
     return { status: 'no_changes', summary: summary || 'No changes needed.' };
   }
 
   // Apply edits
+  log(`Applying ${edits.length} edit(s)…`);
   const changedFiles = [];
   for (const edit of edits) {
     const fullPath = path.join(cloneDir, edit.path);
     fs.mkdirSync(path.dirname(fullPath), { recursive: true });
     fs.writeFileSync(fullPath, edit.content);
     changedFiles.push(edit.path);
+    log(`  ✎ ${edit.path}: ${edit.summary}`);
   }
 
   // Commit, push, create PR
@@ -219,13 +233,17 @@ async function analyzeAndFix({ imagePaths, projectPath, message }) {
   let prUrl = '';
 
   try {
+    log('Staging and committing…');
     for (const f of changedFiles) {
       execSync(`git add -- "${f}"`, { cwd: cloneDir, stdio: 'pipe' });
     }
     execSync(`git commit -m "${commitMsg.replace(/"/g, '\\"')}"`, { cwd: cloneDir, stdio: 'pipe' });
+
+    log(`Pushing branch ${branch}…`);
     execSync(`git push -u origin ${branch}`, { cwd: cloneDir, stdio: 'pipe' });
 
     // Create PR via gh CLI
+    log('Creating pull request…');
     const prBody = `## Screenshot fix\n\n${summary}\n\n## Changes\n${changedFiles.map(f => '- ' + f).join('\n')}\n\n---\nAutomated fix by xmuggle`;
     const prOutput = execSync(
       `gh pr create --title "${commitMsg.replace(/"/g, '\\"')}" --body "${prBody.replace(/"/g, '\\"')}"`,
@@ -234,7 +252,9 @@ async function analyzeAndFix({ imagePaths, projectPath, message }) {
     // gh pr create prints the URL as the last line
     const lines = prOutput.split('\n');
     prUrl = lines[lines.length - 1];
+    log(`PR created: ${prUrl}`);
   } catch (e) {
+    log(`Push/PR failed: ${e.stderr || e.message}`);
     // Clean up but still report what happened
     fs.rmSync(cloneDir, { recursive: true, force: true });
     return {
@@ -245,7 +265,9 @@ async function analyzeAndFix({ imagePaths, projectPath, message }) {
   }
 
   // Clean up clone
+  log('Cleaning up temp clone…');
   fs.rmSync(cloneDir, { recursive: true, force: true });
+  log('Done!');
 
   return {
     status: 'success',

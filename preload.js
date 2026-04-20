@@ -14,4 +14,7 @@ contextBridge.exposeInMainWorld('xmuggle', {
   onImagesUpdated: (callback) => {
     ipcRenderer.on('images-updated', (_, images) => callback(images));
   },
+  onTaskProgress: (callback) => {
+    ipcRenderer.on('task-progress', (_, imgPath, msg) => callback(imgPath, msg));
+  },
 });

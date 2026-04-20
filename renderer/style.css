@@ -401,6 +401,28 @@ header h1 {
 
 .modal-send-btn:hover { background: #c0392b; }
 
+.progress-log {
+  background: rgba(0, 0, 0, 0.7);
+  font-family: "SF Mono", "Menlo", "Monaco", monospace;
+  font-size: 10px;
+  color: #74b9ff;
+  padding: 6px 8px;
+  max-height: 120px;
+  overflow-y: auto;
+  line-height: 1.5;
+}
+
+.progress-line {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.progress-line::before {
+  content: "> ";
+  color: #636e72;
+}
+
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
