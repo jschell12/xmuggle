@@ -102,10 +102,19 @@ function getRepoContext(repoRoot) {
   return { files, fileContents };
 }
 
-async function analyzeAndFix({ imagePaths, repo, message }) {
+async function analyzeAndFix({ imagePaths, projectPath, message }) {
   const apiKey = getApiKey();
   if (!apiKey) throw new Error('No API key. Set ANTHROPIC_API_KEY or save to ~/.xmuggle/api-key');
-  if (!repo) throw new Error('No repo specified');
+  if (!projectPath) throw new Error('No project specified');
+
+  // Derive repo slug from project's git remote
+  let repo;
+  try {
+    const remote = execSync('git remote get-url origin', { cwd: projectPath, encoding: 'utf8' }).trim();
+    repo = remote.replace(/^https:\/\/github\.com\//, '').replace(/^git@github\.com:/, '').replace(/\.git$/, '');
+  } catch {
+    repo = path.basename(projectPath);
+  }
 
   // Clone repo to temp dir
   fs.mkdirSync(WORK_DIR, { recursive: true });

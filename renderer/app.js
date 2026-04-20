@@ -5,6 +5,8 @@ const apiKeyInput = document.getElementById('api-key-input');
 const apiKeySave = document.getElementById('api-key-save');
 const apiStatus = document.getElementById('api-status');
 const toast = document.getElementById('toast');
+const projectTabs = document.getElementById('project-tabs');
+const addProjectBtn = document.getElementById('add-project');
 
 const BADGE_LABELS = {
   new: 'New',
@@ -15,7 +17,10 @@ const BADGE_LABELS = {
   error: 'Error',
 };
 
+let projects = [];
 const processingSet = new Set();
+
+// ── Toast ──
 
 function showToast(msg, isError) {
   toast.innerHTML = '';
@@ -30,14 +35,54 @@ function showToast(msg, isError) {
   toast.className = `toast ${isError ? 'toast-error' : 'toast-success'}`;
 }
 
+// ── Projects ──
+
+async function loadProjects() {
+  projects = await window.xmuggle.listProjects();
+  renderProjectTabs();
+}
+
+function renderProjectTabs() {
+  projectTabs.innerHTML = '';
+  for (const p of projects) {
+    const tab = document.createElement('div');
+    tab.className = 'project-tab';
+    tab.textContent = p.name;
+    tab.title = p.path;
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'project-remove';
+    removeBtn.textContent = '\u00d7';
+    removeBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await window.xmuggle.removeProject(p.path);
+      await loadProjects();
+    });
+    tab.appendChild(removeBtn);
+    projectTabs.appendChild(tab);
+  }
+}
+
+addProjectBtn.addEventListener('click', async () => {
+  const result = await window.xmuggle.addProject();
+  if (result && !result.error) {
+    await loadProjects();
+    showToast(`Added project: ${result.name}`, false);
+  } else if (result && result.error) {
+    showToast(result.error, true);
+  }
+});
+
+// ── Images ──
+
 function render(images) {
   grid.innerHTML = '';
 
   const total = images.length;
-  const pending = images.filter(i => i.status === 'new' || i.status === 'pending').length;
-  const inProgress = images.filter(i => processingSet.has(i.path)).length;
+  const pending = images.filter(i => i.status === 'new').length;
+  const inProgress = images.filter(i => i.status === 'processing' || processingSet.has(i.path)).length;
   const done = images.filter(i => i.status === 'done').length;
-  count.textContent = `${total} images \u2022 ${pending} pending \u2022 ${inProgress} in progress \u2022 ${done} done`;
+  count.textContent = `${total} images \u2022 ${pending} new \u2022 ${inProgress} in progress \u2022 ${done} done`;
 
   for (const img of images) {
     const isProcessing = processingSet.has(img.path);
@@ -54,6 +99,14 @@ function render(images) {
     badge.className = `badge ${status}`;
     badge.textContent = BADGE_LABELS[status] || status;
     card.appendChild(badge);
+
+    // Project label if assigned
+    if (img.projectPath) {
+      const projLabel = document.createElement('div');
+      projLabel.className = 'project-label';
+      projLabel.textContent = img.projectPath.split('/').pop();
+      card.appendChild(projLabel);
+    }
 
     // Send button
     if (!isProcessing && status !== 'done') {
@@ -90,10 +143,19 @@ function render(images) {
   }
 }
 
+// ── Send Modal ──
+
 function promptAndSend(img) {
-  // Remove any existing modal
   const existing = document.getElementById('context-modal');
   if (existing) existing.remove();
+
+  let projectOptions = '';
+  for (const p of projects) {
+    projectOptions += `<option value="${p.path}">${p.name}</option>`;
+  }
+  if (projects.length === 0) {
+    projectOptions = '<option value="">No projects — add one first</option>';
+  }
 
   const modal = document.createElement('div');
   modal.id = 'context-modal';
@@ -102,47 +164,46 @@ function promptAndSend(img) {
     <div class="modal">
       <div class="modal-title">Send to Claude</div>
       <div class="modal-subtitle">${img.name}</div>
-      <input type="text" id="repo-input" placeholder="owner/repo (e.g. jschell12/ai-enhance)" spellcheck="false">
+      <label class="modal-label">Project</label>
+      <select id="project-select">${projectOptions}</select>
+      <label class="modal-label">Context</label>
       <textarea id="context-input" placeholder="What's wrong? What should be fixed?" rows="3"></textarea>
       <div class="modal-actions">
         <button id="modal-cancel" class="link-btn">Cancel</button>
-        <button id="modal-send" class="modal-send-btn">Send</button>
+        <button id="modal-send" class="modal-send-btn" ${projects.length === 0 ? 'disabled' : ''}>Send</button>
       </div>
     </div>
   `;
   document.body.appendChild(modal);
 
-  const repoInput = document.getElementById('repo-input');
   const contextInput = document.getElementById('context-input');
-  repoInput.focus();
+  const projectSelect = document.getElementById('project-select');
+  projectSelect.focus();
 
   document.getElementById('modal-cancel').addEventListener('click', () => modal.remove());
   modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
 
   const doSend = () => {
-    const repo = repoInput.value.trim();
-    if (!repo) { repoInput.focus(); return; }
+    const projectPath = projectSelect.value;
+    if (!projectPath) return;
     const message = contextInput.value.trim();
     modal.remove();
-    sendImage(img, repo, message);
+    sendImage(img, projectPath, message);
   };
 
   document.getElementById('modal-send').addEventListener('click', doSend);
   contextInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) doSend();
   });
-  repoInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') contextInput.focus();
-  });
 }
 
-async function sendImage(img, repo, message) {
+async function sendImage(img, projectPath, message) {
   processingSet.add(img.path);
   const images = await window.xmuggle.getImages();
   render(images);
 
   try {
-    const result = await window.xmuggle.sendToApi([img.path], repo, message || '');
+    const result = await window.xmuggle.sendToApi([img.path], projectPath, message || '');
     processingSet.delete(img.path);
 
     if (result.status === 'success') {
@@ -162,6 +223,8 @@ async function sendImage(img, repo, message) {
   const updated = await window.xmuggle.getImages();
   render(updated);
 }
+
+// ── API Key ──
 
 async function initApiKey() {
   const hasKey = await window.xmuggle.hasApiKey();
@@ -208,6 +271,8 @@ apiKeyInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') apiKeySave.click();
 });
 
+// ── Init ──
+
 async function refresh() {
   const images = await window.xmuggle.getImages();
   render(images);
@@ -215,4 +280,5 @@ async function refresh() {
 
 window.xmuggle.onImagesUpdated((images) => render(images));
 initApiKey();
+loadProjects();
 refresh();
