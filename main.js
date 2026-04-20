@@ -51,9 +51,17 @@ function saveTasks(tasks) {
   fs.writeFileSync(TASKS_FILE, JSON.stringify(tasks, null, 2) + '\n');
 }
 
-function updateTaskStatus(imagePath, projectPath, taskId, status, prUrl) {
+function updateTaskStatus(imagePath, projectPath, taskId, status, prUrl, conversation, apiMessages) {
   const tasks = loadTasks();
-  tasks[imagePath] = { projectPath, taskId, status, prUrl: prUrl || '' };
+  const existing = tasks[imagePath] || {};
+  tasks[imagePath] = {
+    projectPath,
+    taskId: taskId || existing.taskId,
+    status,
+    prUrl: prUrl || existing.prUrl || '',
+    conversation: conversation || existing.conversation || [],
+    apiMessages: apiMessages || existing.apiMessages || [],
+  };
   saveTasks(tasks);
 }
 
@@ -93,7 +101,8 @@ function getDesktopImages() {
         const task = tasks[full];
         const status = task ? task.status : 'new';
         const projectPath = task ? task.projectPath : '';
-        images.push({ path: full, name, mtime: stat.mtimeMs, status, projectPath });
+        const conversation = task ? (task.conversation || []) : [];
+        images.push({ path: full, name, mtime: stat.mtimeMs, status, projectPath, conversation });
       } catch {}
     }
     images.sort((a, b) => b.mtime - a.mtime);
@@ -195,16 +204,50 @@ app.whenReady().then(() => {
 
     try {
       const result = await api.analyzeAndFix({ imagePaths, projectPath, message, onProgress });
-      if (result.status === 'success') {
-        updateTaskStatus(imgPath, projectPath, taskId, 'done', result.prUrl);
-      } else {
-        updateTaskStatus(imgPath, projectPath, taskId, result.status === 'no_changes' ? 'done' : 'error');
-      }
+      const finalStatus = result.status === 'success' ? 'done' : (result.status === 'no_changes' ? 'done' : 'error');
+      updateTaskStatus(imgPath, projectPath, taskId, finalStatus, result.prUrl, result.conversation, result.messages);
       return result;
     } catch (err) {
       updateTaskStatus(imgPath, projectPath, taskId, 'error');
       throw err;
     }
+  });
+
+  // Follow-up message on existing conversation
+  ipcMain.handle('send-followup', async (event, imgPath, message) => {
+    const tasks = loadTasks();
+    const task = tasks[imgPath];
+    if (!task) throw new Error('No task found for this image');
+
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const onProgress = (msg) => {
+      try { win.webContents.send('task-progress', imgPath, msg); } catch {}
+    };
+
+    updateTaskStatus(imgPath, task.projectPath, task.taskId, 'processing', task.prUrl, task.conversation, task.apiMessages);
+
+    try {
+      const result = await api.analyzeAndFix({
+        imagePaths: [imgPath],
+        projectPath: task.projectPath,
+        message,
+        onProgress,
+        priorMessages: task.apiMessages,
+      });
+      const finalStatus = result.status === 'success' ? 'done' : (result.status === 'no_changes' ? 'done' : 'error');
+      updateTaskStatus(imgPath, task.projectPath, task.taskId, finalStatus, result.prUrl || task.prUrl, result.conversation, result.messages);
+      return result;
+    } catch (err) {
+      updateTaskStatus(imgPath, task.projectPath, task.taskId, 'error', task.prUrl, task.conversation, task.apiMessages);
+      throw err;
+    }
+  });
+
+  // Get conversation for an image
+  ipcMain.handle('get-conversation', (_, imgPath) => {
+    const tasks = loadTasks();
+    const task = tasks[imgPath];
+    return task ? (task.conversation || []) : [];
   });
 
   createWindow();

@@ -56,7 +56,7 @@ header h1 {
   cursor: pointer;
 }
 
-#api-status {
+#api-status, #gh-status {
   font-size: 12px;
 }
 
@@ -422,6 +422,94 @@ header h1 {
   content: "> ";
   color: #636e72;
 }
+
+.card-expanded {
+  grid-column: span 2;
+}
+
+.conversation {
+  background: #121a30;
+  padding: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+  border-top: 1px solid #0f3460;
+}
+
+.conv-msg {
+  padding: 6px 10px;
+  margin-bottom: 4px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.conv-user {
+  background: #0f3460;
+  color: #74b9ff;
+  margin-left: 20%;
+  text-align: right;
+}
+
+.conv-assistant {
+  background: #1e1035;
+  color: #dfe6e9;
+  margin-right: 20%;
+}
+
+.conv-input-row {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+  background: #121a30;
+  border-top: 1px solid #0f3460;
+}
+
+.conv-input {
+  flex: 1;
+  background: #1a1a2e;
+  border: 1px solid #0f3460;
+  color: #e0e0e0;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.conv-input:focus {
+  outline: none;
+  border-color: #e94560;
+}
+
+.conv-send-btn {
+  background: #e94560;
+  color: #fff;
+  border: none;
+  width: 32px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.conv-send-btn:hover { background: #c0392b; }
+
+.chat-btn {
+  position: absolute;
+  bottom: 32px;
+  left: 8px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #74b9ff;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.card:hover .chat-btn { opacity: 1; }
 
 @keyframes pulse {
   0%, 100% { opacity: 1; }

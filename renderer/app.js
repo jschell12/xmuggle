@@ -25,6 +25,7 @@ let projects = [];
 let activeProject = null; // path of selected project, or null for "all"
 const processingSet = new Set();
 const progressLogs = {}; // imgPath -> [messages]
+let expandedCard = null; // imgPath of card with conversation open
 
 // ── Toast ──
 
@@ -121,8 +122,10 @@ function render(images) {
 
   for (const img of filtered) {
     const isProcessing = processingSet.has(img.path);
+    const isExpanded = expandedCard === img.path;
+    const hasConversation = img.conversation && img.conversation.length > 0;
     const card = document.createElement('div');
-    card.className = 'card' + (isProcessing ? ' card-processing' : '');
+    card.className = 'card' + (isProcessing ? ' card-processing' : '') + (isExpanded ? ' card-expanded' : '');
 
     const imgEl = document.createElement('img');
     imgEl.src = `file://${img.path}`;
@@ -143,7 +146,7 @@ function render(images) {
       card.appendChild(projLabel);
     }
 
-    // Progress log
+    // Progress log (during processing)
     if (isProcessing && progressLogs[img.path] && progressLogs[img.path].length > 0) {
       const logEl = document.createElement('div');
       logEl.className = 'progress-log';
@@ -156,6 +159,67 @@ function render(images) {
       }
       card.appendChild(logEl);
       requestAnimationFrame(() => { logEl.scrollTop = logEl.scrollHeight; });
+    }
+
+    // Conversation panel (when expanded or has history)
+    if (isExpanded && hasConversation) {
+      const convEl = document.createElement('div');
+      convEl.className = 'conversation';
+      convEl.id = `conv-${CSS.escape(img.path)}`;
+
+      for (const msg of img.conversation) {
+        const msgEl = document.createElement('div');
+        msgEl.className = `conv-msg conv-${msg.role}`;
+        msgEl.textContent = msg.text;
+        convEl.appendChild(msgEl);
+      }
+
+      card.appendChild(convEl);
+      requestAnimationFrame(() => { convEl.scrollTop = convEl.scrollHeight; });
+
+      // Follow-up input
+      if (!isProcessing) {
+        const inputRow = document.createElement('div');
+        inputRow.className = 'conv-input-row';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'conv-input';
+        input.placeholder = 'Follow up\u2026';
+        input.addEventListener('click', (e) => e.stopPropagation());
+        const sendBtn = document.createElement('button');
+        sendBtn.className = 'conv-send-btn';
+        sendBtn.textContent = '\u25B6';
+        sendBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const text = input.value.trim();
+          if (!text) return;
+          input.value = '';
+          sendFollowup(img, text);
+        });
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.stopPropagation();
+            sendBtn.click();
+          }
+        });
+        inputRow.appendChild(input);
+        inputRow.appendChild(sendBtn);
+        card.appendChild(inputRow);
+      }
+    }
+
+    // Chat indicator / expand toggle for cards with conversation
+    if (hasConversation && !isExpanded) {
+      const chatBtn = document.createElement('button');
+      chatBtn.className = 'chat-btn';
+      chatBtn.textContent = `\u{1F4AC} ${img.conversation.length}`;
+      chatBtn.title = 'View conversation';
+      chatBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        expandedCard = img.path;
+        refresh();
+      });
+      card.appendChild(chatBtn);
     }
 
     // Send button
@@ -189,6 +253,14 @@ function render(images) {
     name.title = img.name;
     card.appendChild(name);
 
+    // Click card to toggle conversation
+    if (hasConversation) {
+      card.addEventListener('click', () => {
+        expandedCard = expandedCard === img.path ? null : img.path;
+        refresh();
+      });
+    }
+
     grid.appendChild(card);
   }
 }
@@ -205,7 +277,7 @@ function promptAndSend(img) {
     projectOptions += `<option value="${p.path}"${selected}>${p.name}</option>`;
   }
   if (projects.length === 0) {
-    projectOptions = '<option value="">No projects — add one first</option>';
+    projectOptions = '<option value="">No projects \u2014 add one first</option>';
   }
 
   const modal = document.createElement('div');
@@ -251,6 +323,7 @@ function promptAndSend(img) {
 async function sendImage(img, projectPath, message) {
   processingSet.add(img.path);
   progressLogs[img.path] = [];
+  expandedCard = img.path;
   const images = await window.xmuggle.getImages();
   render(images);
 
@@ -259,7 +332,34 @@ async function sendImage(img, projectPath, message) {
     processingSet.delete(img.path);
 
     if (result.status === 'success') {
-      await window.xmuggle.deleteImage(img.path);
+      const prInfo = result.prUrl ? ` PR: ${result.prUrl}` : '';
+      showToast(`Fixed: ${result.summary}${prInfo}`, false);
+    } else if (result.status === 'no_changes') {
+      showToast(result.summary, false);
+    } else {
+      showToast(`Error: ${result.summary}`, true);
+    }
+  } catch (err) {
+    processingSet.delete(img.path);
+    showToast(`Error: ${err.message}`, true);
+  }
+
+  delete progressLogs[img.path];
+  const updated = await window.xmuggle.getImages();
+  render(updated);
+}
+
+async function sendFollowup(img, message) {
+  processingSet.add(img.path);
+  progressLogs[img.path] = [];
+  const images = await window.xmuggle.getImages();
+  render(images);
+
+  try {
+    const result = await window.xmuggle.sendFollowup(img.path, message);
+    processingSet.delete(img.path);
+
+    if (result.status === 'success') {
       const prInfo = result.prUrl ? ` PR: ${result.prUrl}` : '';
       showToast(`Fixed: ${result.summary}${prInfo}`, false);
     } else if (result.status === 'no_changes') {

@@ -140,14 +140,44 @@ function getRepoContext(repoRoot) {
   return { files, fileContents };
 }
 
-async function analyzeAndFix({ imagePaths, projectPath, message, onProgress }) {
-  const log = onProgress || (() => {});
+// Call Claude API with a messages array, return the response + updated messages
+async function callClaude(messages) {
   const apiKey = getApiKey();
   if (!apiKey) throw new Error('No API key. Set ANTHROPIC_API_KEY or save to ~/.xmuggle/api-key');
+
+  const body = {
+    model: MODEL,
+    max_tokens: MAX_TOKENS,
+    system: SYSTEM_PROMPT,
+    tools: [EDIT_FILE_TOOL],
+    tool_choice: { type: 'auto' },
+    messages,
+  };
+
+  const resp = await fetch(API_URL, {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!resp.ok) {
+    const err = await resp.text();
+    throw new Error(`API error ${resp.status}: ${err}`);
+  }
+
+  return await resp.json();
+}
+
+async function analyzeAndFix({ imagePaths, projectPath, message, onProgress, priorMessages }) {
+  const log = onProgress || (() => {});
   if (!projectPath) throw new Error('No project specified');
 
   // Derive repo slug from project's git remote
-  log('Resolving repo from git remote…');
+  log('Resolving repo from git remote\u2026');
   let repo;
   try {
     const remote = execSync('git remote get-url origin', { cwd: projectPath, encoding: 'utf8' }).trim();
@@ -163,7 +193,7 @@ async function analyzeAndFix({ imagePaths, projectPath, message, onProgress }) {
   const cloneDir = path.join(WORK_DIR, `${repo.replace(/\//g, '-')}-${id}`);
   const branch = `xmuggle-fix-${id}`;
 
-  log(`Cloning ${repo} (shallow)…`);
+  log(`Cloning ${repo} (shallow)\u2026`);
   try {
     execSync(`git clone --depth 1 ${repoURL(repo)} "${cloneDir}"`, { encoding: 'utf8', stdio: 'pipe', env: gitEnv() });
   } catch (e) {
@@ -172,70 +202,55 @@ async function analyzeAndFix({ imagePaths, projectPath, message, onProgress }) {
   log('Clone complete');
 
   // Create branch
-  log(`Creating branch ${branch}…`);
+  log(`Creating branch ${branch}\u2026`);
   execSync(`git checkout -b ${branch}`, { cwd: cloneDir, stdio: 'pipe' });
 
-  // Build image blocks
-  log(`Encoding ${imagePaths.length} image(s)…`);
-  const imageBlocks = imagePaths.map(p => ({
-    type: 'image',
-    source: {
-      type: 'base64',
-      media_type: mediaType(p),
-      data: fs.readFileSync(p).toString('base64'),
-    },
-  }));
+  // Build messages array
+  let messages;
+  if (priorMessages && priorMessages.length > 0) {
+    // Continue conversation — append a new user message
+    messages = [...priorMessages, { role: 'user', content: [{ type: 'text', text: message || 'Please continue fixing.' }] }];
+    log('Continuing conversation\u2026');
+  } else {
+    // First message — include images + repo context
+    log(`Encoding ${imagePaths.length} image(s)\u2026`);
+    const imageBlocks = imagePaths.map(p => ({
+      type: 'image',
+      source: {
+        type: 'base64',
+        media_type: mediaType(p),
+        data: fs.readFileSync(p).toString('base64'),
+      },
+    }));
 
-  // Gather repo context
-  log('Gathering repo context (file list + source files)…');
-  const ctx = getRepoContext(cloneDir);
-  log(`Found ${ctx.files.length} tracked files, reading ${ctx.fileContents.length} source files`);
-  let contextText = `Repository: ${repo}\n\nFiles in repo:\n${ctx.files.join('\n')}\n\n`;
+    log('Gathering repo context (file list + source files)\u2026');
+    const ctx = getRepoContext(cloneDir);
+    log(`Found ${ctx.files.length} tracked files, reading ${ctx.fileContents.length} source files`);
+    let contextText = `Repository: ${repo}\n\nFiles in repo:\n${ctx.files.join('\n')}\n\n`;
 
-  for (const f of ctx.fileContents) {
-    contextText += `--- ${f.path} ---\n${f.content}\n\n`;
-  }
+    for (const f of ctx.fileContents) {
+      contextText += `--- ${f.path} ---\n${f.content}\n\n`;
+    }
 
-  if (message) {
-    contextText += `\nUser context: ${message}\n`;
-  }
+    if (message) {
+      contextText += `\nUser context: ${message}\n`;
+    }
 
-  contextText += '\nAnalyze the screenshot(s) and fix the issue using the edit_file tool.';
+    contextText += '\nAnalyze the screenshot(s) and fix the issue using the edit_file tool.';
 
-  // Call API
-  log(`Calling Claude API (${MODEL})…`);
-  const body = {
-    model: MODEL,
-    max_tokens: MAX_TOKENS,
-    system: SYSTEM_PROMPT,
-    tools: [EDIT_FILE_TOOL],
-    tool_choice: { type: 'auto' },
-    messages: [{
+    messages = [{
       role: 'user',
       content: [...imageBlocks, { type: 'text', text: contextText }],
-    }],
-  };
-
-  const resp = await fetch(API_URL, {
-    method: 'POST',
-    headers: {
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!resp.ok) {
-    fs.rmSync(cloneDir, { recursive: true, force: true });
-    const err = await resp.text();
-    throw new Error(`API error ${resp.status}: ${err}`);
+    }];
   }
 
-  log('API response received, parsing…');
-  const result = await resp.json();
+  // Call API
+  log(`Calling Claude API (${MODEL})\u2026`);
+  const result = await callClaude(messages);
 
-  // Extract edits
+  log('API response received, parsing\u2026');
+
+  // Extract edits and text from response
   const edits = [];
   let summary = '';
 
@@ -248,21 +263,27 @@ async function analyzeAndFix({ imagePaths, projectPath, message, onProgress }) {
     }
   }
 
+  // Build conversation history: append assistant response
+  const updatedMessages = [...messages, { role: 'assistant', content: result.content }];
+
+  // Build display-friendly conversation
+  const conversation = buildConversation(updatedMessages);
+
   if (edits.length === 0) {
-    log('No edits returned — cleaning up');
+    log('No edits returned \u2014 cleaning up');
     fs.rmSync(cloneDir, { recursive: true, force: true });
-    return { status: 'no_changes', summary: summary || 'No changes needed.' };
+    return { status: 'no_changes', summary: summary || 'No changes needed.', messages: updatedMessages, conversation };
   }
 
   // Apply edits
-  log(`Applying ${edits.length} edit(s)…`);
+  log(`Applying ${edits.length} edit(s)\u2026`);
   const changedFiles = [];
   for (const edit of edits) {
     const fullPath = path.join(cloneDir, edit.path);
     fs.mkdirSync(path.dirname(fullPath), { recursive: true });
     fs.writeFileSync(fullPath, edit.content);
     changedFiles.push(edit.path);
-    log(`  ✎ ${edit.path}: ${edit.summary}`);
+    log(`  \u270e ${edit.path}: ${edit.summary}`);
   }
 
   // Commit, push, create PR
@@ -271,20 +292,20 @@ async function analyzeAndFix({ imagePaths, projectPath, message, onProgress }) {
   let prUrl = '';
 
   try {
-    log('Staging and committing…');
+    log('Staging and committing\u2026');
     for (const f of changedFiles) {
       execSync(`git add -- "${f}"`, { cwd: cloneDir, stdio: 'pipe' });
     }
     execSync(`git commit -m "${commitMsg.replace(/"/g, '\\"')}"`, { cwd: cloneDir, stdio: 'pipe' });
 
-    log(`Pushing branch ${branch}…`);
+    log(`Pushing branch ${branch}\u2026`);
     execSync(`git push -u origin ${branch}`, { cwd: cloneDir, stdio: 'pipe', env: gitEnv() });
 
     // Create PR via gh CLI
-    log('Creating pull request…');
+    log('Creating pull request\u2026');
     const prBody = `## Screenshot fix\n\n${summary}\n\n## Changes\n${changedFiles.map(f => '- ' + f).join('\n')}\n\n---\nAutomated fix by xmuggle`;
     const prOutput = execSync(
-      `gh pr create --title "${commitMsg.replace(/"/g, '\\"')}" --body "${prBody.replace(/"/g, '\\"')}"`,
+      `gh pr create --head "${branch}" --title "${commitMsg.replace(/"/g, '\\"')}" --body "${prBody.replace(/"/g, '\\"')}"`,
       { cwd: cloneDir, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], env: gitEnv() }
     ).trim();
     // gh pr create prints the URL as the last line
@@ -293,17 +314,18 @@ async function analyzeAndFix({ imagePaths, projectPath, message, onProgress }) {
     log(`PR created: ${prUrl}`);
   } catch (e) {
     log(`Push/PR failed: ${e.stderr || e.message}`);
-    // Clean up but still report what happened
     fs.rmSync(cloneDir, { recursive: true, force: true });
     return {
       status: 'push_failed',
       summary: `Edits applied but push/PR failed: ${e.stderr || e.message}`,
       changedFiles,
+      messages: updatedMessages,
+      conversation,
     };
   }
 
   // Clean up clone
-  log('Cleaning up temp clone…');
+  log('Cleaning up temp clone\u2026');
   fs.rmSync(cloneDir, { recursive: true, force: true });
   log('Done!');
 
@@ -313,7 +335,52 @@ async function analyzeAndFix({ imagePaths, projectPath, message, onProgress }) {
     prUrl,
     changedFiles,
     analysisText: summary,
+    messages: updatedMessages,
+    conversation,
   };
+}
+
+// Convert raw API messages to display-friendly format
+function buildConversation(messages) {
+  const conv = [];
+  for (const msg of messages) {
+    if (msg.role === 'user') {
+      // Extract user text (skip images and repo context)
+      let text = '';
+      if (Array.isArray(msg.content)) {
+        for (const block of msg.content) {
+          if (block.type === 'text') {
+            // Pull out just the "User context:" line if present
+            const match = block.text.match(/User context:\s*(.+)/);
+            if (match) {
+              text = match[1].trim();
+            } else if (!block.text.startsWith('Repository:')) {
+              text = block.text;
+            }
+          }
+        }
+      } else {
+        text = msg.content;
+      }
+      if (text) conv.push({ role: 'user', text });
+    } else if (msg.role === 'assistant') {
+      let text = '';
+      const files = [];
+      if (Array.isArray(msg.content)) {
+        for (const block of msg.content) {
+          if (block.type === 'text') text += block.text;
+          if (block.type === 'tool_use' && block.name === 'edit_file') {
+            files.push(block.input.path + ': ' + block.input.summary);
+          }
+        }
+      }
+      const parts = [];
+      if (text) parts.push(text);
+      if (files.length) parts.push('Files changed:\n' + files.map(f => '  - ' + f).join('\n'));
+      if (parts.length) conv.push({ role: 'assistant', text: parts.join('\n\n') });
+    }
+  }
+  return conv;
 }
 
 module.exports = { getApiKey, setApiKey, resetApiKey, hasApiKey, getGhToken, setGhToken, resetGhToken, hasGhToken, analyzeAndFix };
