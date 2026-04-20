@@ -42,6 +42,14 @@ function showToast(msg, isError) {
   toast.className = `toast ${isError ? 'toast-error' : 'toast-success'}`;
 }
 
+// ── URL Detection ──
+
+function makeLinksClickable(text) {
+  // Simple URL regex that matches http/https URLs
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  return text.replace(urlRegex, '<a href="$1" class="conv-link" target="_blank" rel="noopener">$1</a>');
+}
+
 // ── Projects ──
 
 async function loadProjects() {
@@ -170,7 +178,21 @@ function render(images) {
       for (const msg of img.conversation) {
         const msgEl = document.createElement('div');
         msgEl.className = `conv-msg conv-${msg.role}`;
-        msgEl.textContent = msg.text;
+        // Use innerHTML to render clickable links, but escape other HTML
+        const escapedText = msg.text.replace(/[&<>"']/g, (match) => {
+          const escapeMap = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'};
+          return escapeMap[match];
+        });
+        msgEl.innerHTML = makeLinksClickable(escapedText);
+        
+        // Handle link clicks
+        msgEl.addEventListener('click', (e) => {
+          if (e.target.classList.contains('conv-link')) {
+            e.preventDefault();
+            window.xmuggle.openExternal(e.target.href);
+          }
+        });
+        
         convEl.appendChild(msgEl);
       }
 
