@@ -42,6 +42,14 @@ function showToast(msg, isError) {
   toast.className = `toast ${isError ? 'toast-error' : 'toast-success'}`;
 }
 
+// ── URL Detection ──
+
+function makeLinksClickable(text) {
+  // Simple URL regex that matches http/https URLs
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  return text.replace(urlRegex, '<a href="$1" class="conv-link" target="_blank" rel="noopener">$1</a>');
+}
+
 // ── Projects ──
 
 async function loadProjects() {
@@ -202,7 +210,7 @@ function render(images) {
       for (const msg of img.conversation) {
         const msgEl = document.createElement('div');
         msgEl.className = `conv-msg conv-${msg.role}`;
-        
+
         // Use makeLinksClickable for message content
         const contentEl = makeLinksClickable(msg.text);
         msgEl.appendChild(contentEl);
