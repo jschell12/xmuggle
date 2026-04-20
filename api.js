@@ -259,7 +259,6 @@ async function analyzeAndFix({ imagePaths, projectPath, message, onProgress, pri
   fs.mkdirSync(WORK_DIR, { recursive: true });
   const id = crypto.randomBytes(4).toString('hex');
   const cloneDir = path.join(WORK_DIR, `${repo.replace(/\//g, '-')}-${id}`);
-  const branch = `xmuggle-fix-${id}`;
 
   log(`Cloning ${repo} (shallow)…`);
   try {
@@ -269,8 +268,7 @@ async function analyzeAndFix({ imagePaths, projectPath, message, onProgress, pri
   }
   log('Clone complete');
 
-  log(`Creating branch ${branch}…`);
-  execSync(`git checkout -b ${branch}`, { cwd: cloneDir, stdio: 'pipe' });
+  log('On main branch…');
 
   // Build messages array
   let messages;
@@ -392,36 +390,26 @@ async function analyzeAndFix({ imagePaths, projectPath, message, onProgress, pri
     log(`  ✎ ${edit.path}: ${edit.summary}`);
   }
 
-  // Commit, push branch, create PR
+  // Commit and push directly to main
   const commitSummary = edits.map(e => e.summary).join('; ');
   const commitMsg = `fix: ${commitSummary}`;
-  let prUrl = '';
 
   try {
-    log('Staging and committing…');
+    log('Staging and committing to main…');
     for (const f of changedFiles) {
       execSync(`git add -- "${f}"`, { cwd: cloneDir, stdio: 'pipe' });
     }
     execSync(`git commit -m "${commitMsg.replace(/"/g, '\\"')}"`, { cwd: cloneDir, stdio: 'pipe' });
 
-    log(`Pushing branch ${branch}…`);
-    execSync(`git push -u origin ${branch}`, { cwd: cloneDir, stdio: 'pipe', env: gitEnv() });
-
-    log('Creating pull request…');
-    const prBody = `## Screenshot fix\n\n${summary}\n\n## Changes\n${changedFiles.map(f => '- ' + f).join('\n')}\n\n---\nAutomated fix by xmuggle`;
-    const prOutput = execSync(
-      `gh pr create --head "${branch}" --title "${commitMsg.replace(/"/g, '\\"')}" --body "${prBody.replace(/"/g, '\\"')}"`,
-      { cwd: cloneDir, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], env: gitEnv() }
-    ).trim();
-    const lines = prOutput.split('\n');
-    prUrl = lines[lines.length - 1];
-    log(`PR created: ${prUrl}`);
+    log('Pushing to main…');
+    execSync('git push origin main', { cwd: cloneDir, stdio: 'pipe', env: gitEnv() });
+    log('Pushed to main');
   } catch (e) {
-    log(`Push/PR failed: ${e.stderr || e.message}`);
+    log(`Push failed: ${e.stderr || e.message}`);
     fs.rmSync(cloneDir, { recursive: true, force: true });
     return {
       status: 'push_failed',
-      summary: `Edits applied but push/PR failed: ${e.stderr || e.message}`,
+      summary: `Edits applied but push failed: ${e.stderr || e.message}`,
       changedFiles,
       messages: updatedMessages,
       conversation,
@@ -444,7 +432,6 @@ async function analyzeAndFix({ imagePaths, projectPath, message, onProgress, pri
   return {
     status: 'success',
     summary: commitSummary,
-    prUrl,
     changedFiles,
     analysisText: summary,
     messages: updatedMessages,
