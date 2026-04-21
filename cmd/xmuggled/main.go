@@ -345,23 +345,31 @@ func processInbox(repoPath string) {
 
 		logf("  Claude finished %s", f)
 
-		// Write result
-		resultFile := filepath.Join(donePath, f+".result")
-		_ = os.WriteFile(resultFile, output, 0644)
-
-		// Mark as done
-		doneMarker := filepath.Join(donePath, f+".done")
-		_ = os.WriteFile(doneMarker, []byte(time.Now().Format(time.RFC3339)+"\n"), 0644)
-
-		// Commit and push the changes claude made (if any)
+		// Commit and push any code changes Claude made
 		if status, _ := runGit(repoPath, "status", "--porcelain"); status != "" {
 			runGit(repoPath, "add", "-A")
-			commitMsg := fmt.Sprintf("xmuggle: processed %s", f)
+			commitMsg := fmt.Sprintf("xmuggle: fix from %s", f)
 			if _, err := runGit(repoPath, "commit", "-m", commitMsg); err == nil {
-				logf("  Pushing changes for %s", f)
+				logf("  Pushing code changes for %s", f)
 				if out, err := runGit(repoPath, "push"); err != nil {
 					logf("  Push failed: %s", out)
 				}
+			}
+		}
+
+		// Write result and mark as done
+		resultFile := filepath.Join(donePath, f+".result")
+		_ = os.WriteFile(resultFile, output, 0644)
+		doneMarker := filepath.Join(donePath, f+".done")
+		_ = os.WriteFile(doneMarker, []byte(time.Now().Format(time.RFC3339)+"\n"), 0644)
+
+		// Commit and push done markers
+		runGit(repoPath, "add", "-A")
+		doneCommitMsg := fmt.Sprintf("xmuggle: mark %s done", f)
+		if _, err := runGit(repoPath, "commit", "-m", doneCommitMsg); err == nil {
+			logf("  Pushing done marker for %s", f)
+			if out, err := runGit(repoPath, "push"); err != nil {
+				logf("  Push failed: %s", out)
 			}
 		}
 	}
