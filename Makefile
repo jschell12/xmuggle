@@ -1,4 +1,4 @@
-.PHONY: install start run build pull daemon daemon-stop daemon-restart daemon-status daemon-log
+.PHONY: install run run-daemon build pull daemon-stop daemon-restart daemon-status daemon-log
 
 INSTALL_DIR := $(HOME)/.local/bin
 LAUNCHD_LABEL := com.xmuggle.daemon
@@ -12,10 +12,10 @@ install: pull build
 pull:
 	git pull --rebase
 
-start: install
+run: install
 	npm start
 
-run:
+run-daemon:
 	$(INSTALL_DIR)/xmuggled run
 
 build:
