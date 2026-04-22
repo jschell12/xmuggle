@@ -31,4 +31,4 @@ daemon-status:
 	$(INSTALL_DIR)/xmuggled status
 
 daemon-log:
-	$(INSTALL_DIR)/xmuggled log 50
+	tail -f $(HOME)/.xmuggle/daemon.log
