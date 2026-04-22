@@ -1,30 +1,34 @@
-.PHONY: install start build daemon daemon-stop daemon-restart daemon-status daemon-log
+.PHONY: install start run build pull daemon daemon-stop daemon-restart daemon-status daemon-log
 
 INSTALL_DIR := $(HOME)/.local/bin
 LAUNCHD_LABEL := com.xmuggle.daemon
 
-install: build
+install: pull build
+	npm install
 	install -d $(INSTALL_DIR)
 	install -m 0755 xmuggled $(INSTALL_DIR)/xmuggled
 	launchctl kill SIGTERM gui/$(shell id -u)/$(LAUNCHD_LABEL) 2>/dev/null || true
 
-start:
+pull:
+	git pull --rebase
+
+start: install
 	npm start
+
+run:
+	$(INSTALL_DIR)/xmuggled run
 
 build:
 	go build -o xmuggled ./cmd/xmuggled/
 
-daemon: build
-	./xmuggled start
-
 daemon-stop:
-	./xmuggled stop
+	$(INSTALL_DIR)/xmuggled stop
 
 daemon-restart:
 	launchctl kill SIGTERM gui/$(shell id -u)/$(LAUNCHD_LABEL)
 
 daemon-status:
-	./xmuggled status
+	$(INSTALL_DIR)/xmuggled status
 
 daemon-log:
-	./xmuggled log 50
+	$(INSTALL_DIR)/xmuggled log 50
