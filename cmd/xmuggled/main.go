@@ -51,7 +51,7 @@ type Config struct {
 }
 
 func defaultConfig() Config {
-	return Config{Interval: 30}
+	return Config{Interval: 10}
 }
 
 func homeDir() string {
@@ -74,7 +74,7 @@ func loadConfig() Config {
 	cfg := defaultConfig()
 	_ = json.Unmarshal(data, &cfg)
 	if cfg.Interval < 1 {
-		cfg.Interval = 30
+		cfg.Interval = 10
 	}
 	return cfg
 }
