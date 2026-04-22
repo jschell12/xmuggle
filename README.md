@@ -70,8 +70,8 @@ tail -f ~/.xmuggle/logs/daemon.stderr.log        # launchd stderr
 |---|---|
 | `make install` | Build daemon, install to `~/.local/bin`, restart via launchd |
 | `make build` | Build `xmuggled` binary |
-| `make start` | Launch Electron UI |
-| `make daemon` | Build and start daemon in foreground |
+| `make run` | Install and launch Electron UI |
+| `make run-daemon` | Run daemon in foreground |
 | `make daemon-stop` | Stop daemon |
 | `make daemon-restart` | Restart daemon via launchd |
 | `make daemon-status` | Show daemon status |
