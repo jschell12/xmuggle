@@ -20,6 +20,7 @@ var (
 	pidFile    = filepath.Join(xmuggleDir, "daemon.pid")
 	logFile    = filepath.Join(xmuggleDir, "daemon.log")
 	queueDir   = filepath.Join(xmuggleDir, "queue-repo")
+	aqScripts  = filepath.Join(homeDir(), "development", "github.com", "jschell12", "agent-queue", "scripts")
 )
 
 type RepoConfig struct {
@@ -29,13 +30,11 @@ type RepoConfig struct {
 }
 
 func (r *RepoConfig) UnmarshalJSON(data []byte) error {
-	// Accept plain string: "/path/to/repo"
 	var s string
 	if err := json.Unmarshal(data, &s); err == nil {
 		r.Path = s
 		return nil
 	}
-	// Accept object: {"path": "/path/to/repo", ...}
 	type alias RepoConfig
 	return json.Unmarshal(data, (*alias)(r))
 }
@@ -52,9 +51,7 @@ type Config struct {
 }
 
 func defaultConfig() Config {
-	return Config{
-		Interval: 30,
-	}
+	return Config{Interval: 30}
 }
 
 func homeDir() string {
@@ -114,7 +111,7 @@ func logf(format string, args ...any) {
 	fmt.Println(msg)
 }
 
-// ── Git env ──
+// ── Git ──
 
 func gitEnv() []string {
 	env := os.Environ()
@@ -156,21 +153,66 @@ func runShell(command, dir string) (string, error) {
 	return strings.TrimSpace(string(out)), err
 }
 
-// ── Queue repo sync ──
+// ── Queue message schema ──
+//
+// Each task lives in pending/<id>/meta.json with these fields:
+//   status: "pending" → "processing" → "done" | "error"
+//   processedBy: hostname of the machine that processed it
+//   result: summary of what was done
+//
+// Both daemons pull the queue repo. Only tasks with status "pending"
+// and from != self are processed. Once done, the status is updated
+// in place so the sender's daemon sees it and can update the UI.
 
 type taskMeta struct {
-	Filenames []string `json:"filenames"`
-	Project   string   `json:"project"`
-	Message   string   `json:"message"`
-	From      string   `json:"from"`
-	Timestamp string   `json:"timestamp"`
+	Filenames   []string `json:"filenames"`
+	Project     string   `json:"project"`
+	Message     string   `json:"message"`
+	From        string   `json:"from"`
+	Timestamp   string   `json:"timestamp"`
+	Status      string   `json:"status"`
+	ProcessedBy string   `json:"processedBy,omitempty"`
+	Result      string   `json:"result,omitempty"`
+	DoneAt      string   `json:"doneAt,omitempty"`
 }
+
+func readTaskMeta(metaFile string) (*taskMeta, error) {
+	data, err := os.ReadFile(metaFile)
+	if err != nil {
+		return nil, err
+	}
+	var m taskMeta
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, err
+	}
+	// Default status for legacy tasks without a status field
+	if m.Status == "" {
+		m.Status = "pending"
+	}
+	return &m, nil
+}
+
+func writeTaskMeta(metaFile string, m *taskMeta) error {
+	data, _ := json.MarshalIndent(m, "", "  ")
+	return os.WriteFile(metaFile, append(data, '\n'), 0644)
+}
+
+func queueCommitPush(message string) {
+	runGit(queueDir, "add", "-A")
+	if _, err := runGit(queueDir, "commit", "-m", message); err == nil {
+		runGit(queueDir, "pull", "--rebase")
+		if out, err := runGit(queueDir, "push"); err != nil {
+			logf("  Queue push failed: %s", out)
+		}
+	}
+}
+
+// ── Queue processing ──
 
 func ensureQueueClone(cfg Config) bool {
 	if cfg.QueueRepo == "" {
 		return false
 	}
-
 	gitDir := filepath.Join(queueDir, ".git")
 	if _, err := os.Stat(gitDir); err != nil {
 		logf("Cloning queue repo: %s", cfg.QueueRepo)
@@ -188,19 +230,13 @@ func ensureQueueClone(cfg Config) bool {
 	return true
 }
 
-// resolveProject finds the local repo path for a project name.
-// Checks configured repos first, then falls back to common dev directories.
 func resolveProject(cfg Config, project string) string {
-	name := filepath.Base(project) // handle "user/repo" or just "repo"
-
-	// Check configured repos
+	name := filepath.Base(project)
 	for _, r := range cfg.Repos {
 		if filepath.Base(r.Path) == name {
 			return r.Path
 		}
 	}
-
-	// Check common locations
 	home := homeDir()
 	candidates := []string{
 		filepath.Join(home, "development", "github.com", project),
@@ -212,7 +248,6 @@ func resolveProject(cfg Config, project string) string {
 			return c
 		}
 	}
-
 	return ""
 }
 
@@ -234,15 +269,17 @@ func processQueue(cfg Config) {
 			continue
 		}
 
-		taskDir := filepath.Join(pendingDir, entry.Name())
+		taskID := entry.Name()
+		taskDir := filepath.Join(pendingDir, taskID)
 		metaFile := filepath.Join(taskDir, "meta.json")
-		data, err := os.ReadFile(metaFile)
+
+		m, err := readTaskMeta(metaFile)
 		if err != nil {
 			continue
 		}
 
-		var m taskMeta
-		if err := json.Unmarshal(data, &m); err != nil {
+		// Skip tasks not in pending state
+		if m.Status != "pending" {
 			continue
 		}
 
@@ -254,24 +291,24 @@ func processQueue(cfg Config) {
 		// Resolve project to local path
 		repoPath := resolveProject(cfg, m.Project)
 		if repoPath == "" {
-			logf("Unknown project %q in task %s, skipping", m.Project, entry.Name())
+			logf("Unknown project %q in task %s, skipping", m.Project, taskID)
 			continue
 		}
 
-		// Check if already done
-		doneDir := filepath.Join(queueDir, "done", entry.Name())
-		if _, err := os.Stat(doneDir); err == nil {
-			continue
-		}
+		logf("Processing task %s for %s", taskID, filepath.Base(repoPath))
 
-		logf("Processing task %s for %s", entry.Name(), filepath.Base(repoPath))
+		// Mark as processing
+		m.Status = "processing"
+		m.ProcessedBy = host
+		writeTaskMeta(metaFile, m)
+		queueCommitPush(fmt.Sprintf("processing: %s", taskID))
 
 		// Pull latest for the target repo
-		if out, err := runGit(repoPath, "pull", "--ff-only"); err != nil {
+		if out, err := runGit(repoPath, "pull", "--rebase"); err != nil {
 			logf("  Pull failed for %s: %s", repoPath, out)
 		}
 
-		// Build prompt with image paths
+		// Collect image paths
 		var imgPaths []string
 		for _, f := range m.Filenames {
 			p := filepath.Join(taskDir, f)
@@ -281,58 +318,61 @@ func processQueue(cfg Config) {
 		}
 
 		if len(imgPaths) == 0 {
-			logf("  No images found in task %s", entry.Name())
+			logf("  No images found in task %s", taskID)
+			m.Status = "error"
+			m.Result = "No images found in task"
+			m.DoneAt = time.Now().Format(time.RFC3339)
+			writeTaskMeta(metaFile, m)
+			queueCommitPush(fmt.Sprintf("error: %s — no images", taskID))
 			continue
 		}
 
+		// Build prompt
 		prompt := fmt.Sprintf(
 			"Analyze the screenshot(s) at %s and fix any bugs or UI issues you find in this repo. %s",
 			strings.Join(imgPaths, ", "), m.Message,
 		)
 
+		// Spawn claude
 		logf("  Spawning claude in %s", filepath.Base(repoPath))
 		cmd := exec.Command("claude", "--print", "--dangerously-skip-permissions", prompt)
 		cmd.Dir = repoPath
 		cmd.Env = gitEnv()
 		output, err := cmd.CombinedOutput()
+		result := strings.TrimSpace(string(output))
+
 		if err != nil {
-			logf("  Claude failed: %v\n%s", err, string(output))
+			logf("  Claude failed: %v\n%s", err, result)
+			m.Status = "error"
+			m.Result = fmt.Sprintf("Claude failed: %v", err)
+			m.DoneAt = time.Now().Format(time.RFC3339)
+			writeTaskMeta(metaFile, m)
+			queueCommitPush(fmt.Sprintf("error: %s", taskID))
 			continue
 		}
 
 		logf("  Claude finished")
 
-		// Commit and push any code changes Claude made to the project repo
+		// Commit and push code changes to the project repo
 		if status, _ := runGit(repoPath, "status", "--porcelain"); status != "" {
 			runGit(repoPath, "add", "-A")
-			commitMsg := fmt.Sprintf("xmuggle: fix from task %s", entry.Name())
+			commitMsg := fmt.Sprintf("xmuggle: fix from task %s", taskID)
 			if _, err := runGit(repoPath, "commit", "-m", commitMsg); err == nil {
-				logf("  Pushing code changes")
+				logf("  Pushing code changes to %s", filepath.Base(repoPath))
 				if out, err := runGit(repoPath, "push"); err != nil {
 					logf("  Push failed: %s", out)
 				}
 			}
 		}
 
-		// Move task to done in queue repo
-		_ = os.MkdirAll(filepath.Join(queueDir, "done"), 0755)
-		_ = os.Rename(taskDir, doneDir)
+		// Mark as done in queue
+		m.Status = "done"
+		m.Result = result
+		m.DoneAt = time.Now().Format(time.RFC3339)
+		writeTaskMeta(metaFile, m)
+		queueCommitPush(fmt.Sprintf("done: %s", taskID))
 
-		// Write result
-		_ = os.WriteFile(filepath.Join(doneDir, "result.txt"), output, 0644)
-		_ = os.WriteFile(filepath.Join(doneDir, "done.txt"),
-			[]byte(time.Now().Format(time.RFC3339)+"\n"), 0644)
-
-		// Commit and push queue repo
-		runGit(queueDir, "add", "-A")
-		queueMsg := fmt.Sprintf("done: %s", entry.Name())
-		if _, err := runGit(queueDir, "commit", "-m", queueMsg); err == nil {
-			runGit(queueDir, "pull", "--rebase")
-			logf("  Pushing queue update")
-			if out, err := runGit(queueDir, "push"); err != nil {
-				logf("  Queue push failed: %s", out)
-			}
-		}
+		logf("  Task %s complete", taskID)
 	}
 }
 
@@ -344,17 +384,14 @@ func syncRepos(cfg Config) {
 			logf("Repo not found: %s", repo.Path)
 			continue
 		}
-
 		if repo.ShouldPull() {
-			logf("Pulling %s", repo.Path)
-			out, err := runGit(repo.Path, "pull", "--ff-only")
+			out, err := runGit(repo.Path, "pull", "--rebase")
 			if err != nil {
-				logf("  Pull failed: %s", out)
+				logf("Pull failed %s: %s", filepath.Base(repo.Path), out)
 			} else if out != "" && !strings.Contains(out, "Already up to date") {
-				logf("  %s", out)
+				logf("Pulled %s: %s", filepath.Base(repo.Path), out)
 			}
 		}
-
 		for _, cmd := range repo.Commands {
 			runCommand(cmd, repo.Path)
 		}
@@ -375,10 +412,8 @@ func runCommand(command, dir string) {
 
 func runCycle() {
 	cfg := loadConfig()
-
-	processQueue(cfg)
 	syncRepos(cfg)
-
+	processQueue(cfg)
 	for _, cmd := range cfg.Commands {
 		runCommand(cmd, "")
 	}
@@ -395,14 +430,10 @@ func main() {
 	switch cmd {
 	case "start":
 		ensureConfig()
-
-		// Check if already running
 		if pid, ok := readPid(); ok {
 			fmt.Printf("Daemon already running (pid %d)\n", pid)
 			return
 		}
-
-		// Re-exec as background process
 		exe, err := os.Executable()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Cannot find executable: %v\n", err)
@@ -410,7 +441,6 @@ func main() {
 		}
 		child := exec.Command(exe, "_run-daemon")
 		child.Env = os.Environ()
-		// Detach from terminal
 		child.Stdin = nil
 		child.Stdout = nil
 		child.Stderr = nil
@@ -422,21 +452,15 @@ func main() {
 		fmt.Printf("Daemon started (pid %d)\n", child.Process.Pid)
 
 	case "_run-daemon":
-		// Internal: the actual daemon loop, runs in background
 		setupLog()
 		cfg := loadConfig()
-
 		_ = os.MkdirAll(xmuggleDir, 0755)
 		_ = os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0644)
-
 		logf("Daemon starting (pid %d, interval %ds)", os.Getpid(), cfg.Interval)
-		logf("Config: %s", configFile)
 
-		// Graceful shutdown
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
 
-		// Run immediately
 		runCycle()
 
 		ticker := time.NewTicker(time.Duration(cfg.Interval) * time.Second)
@@ -485,7 +509,6 @@ func main() {
 		fmt.Printf("Interval:   %ds\n", cfg.Interval)
 		fmt.Printf("Queue repo: %s\n", orDefault(cfg.QueueRepo, "(none)"))
 		fmt.Printf("Repos:      %d\n", len(cfg.Repos))
-		fmt.Printf("Commands:   %d\n", len(cfg.Commands))
 
 	case "config":
 		ensureConfig()
@@ -513,7 +536,6 @@ func main() {
 		cfg := loadConfig()
 		abs, _ := filepath.Abs(os.Args[2])
 		cmds := os.Args[3:]
-
 		found := false
 		for i, r := range cfg.Repos {
 			if r.Path == abs {
@@ -578,14 +600,14 @@ func main() {
 		fmt.Print(`xmuggled — xmuggle sync daemon
 
 Usage:
-  xmuggled start                   Start the daemon (background)
+  xmuggled start                   Start daemon (background)
   xmuggled run                     Run a single sync cycle
-  xmuggled stop                    Stop the running daemon
-  xmuggled status                  Show daemon status and config summary
-  xmuggled config                  Print current config
+  xmuggled stop                    Stop the daemon
+  xmuggled status                  Show status
+  xmuggled config                  Print config
   xmuggled edit                    Open config in $EDITOR
   xmuggled log [n]                 Show last n log lines (default 20)
-  xmuggled set-queue <repo-url>    Set the queue repo URL
+  xmuggled set-queue <repo-url>    Set queue repo URL
   xmuggled add-repo <path> [cmd]   Add a repo to sync
   xmuggled add-command <cmd>       Add a global command
 

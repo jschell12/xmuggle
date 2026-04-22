@@ -224,6 +224,7 @@ function queuePush(imagePaths, projectPath, message) {
     message: message || '',
     from: os.hostname(),
     timestamp: new Date().toISOString(),
+    status: 'pending',
   }, null, 2) + '\n');
 
   execSync('git add -A', { cwd: queueDir, stdio: 'pipe' });

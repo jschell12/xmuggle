@@ -16,7 +16,7 @@ run: install
 	npm start
 
 run-daemon:
-	$(INSTALL_DIR)/xmuggled run
+	$(INSTALL_DIR)/xmuggled start
 
 build:
 	go build -o xmuggled ./cmd/xmuggled/
