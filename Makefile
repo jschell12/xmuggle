@@ -12,7 +12,7 @@ install: pull build
 pull:
 	git pull --rebase
 
-run: install
+run:
 	npm start
 
 run-daemon:
