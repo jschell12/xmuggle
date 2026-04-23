@@ -98,7 +98,7 @@ function syncTaskStatuses() {
     const api = require('./api');
     const env = api.gitEnv();
     try {
-      execSync('git pull --rebase', { cwd: QUEUE_REPO_DIR, stdio: 'pipe', env });
+      execSync('git fetch origin && git reset --hard origin/main', { cwd: QUEUE_REPO_DIR, stdio: 'pipe', env, shell: true });
     } catch {}
   }
 
@@ -213,7 +213,7 @@ function ensureQueueClone() {
     }
   } else {
     try {
-      execSync('git pull --rebase', { cwd: QUEUE_REPO_DIR, stdio: 'pipe', env });
+      execSync('git fetch origin && git reset --hard origin/main', { cwd: QUEUE_REPO_DIR, stdio: 'pipe', env, shell: true });
     } catch {}
   }
   return QUEUE_REPO_DIR;
