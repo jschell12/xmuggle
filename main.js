@@ -360,7 +360,7 @@ function createWindow() {
 
   // Watch each project's .xmuggle/ dir
   for (const p of loadProjects()) {
-    const xdir = path.join(p, '.xmuggle');
+    const xdir = path.join(p.path, '.xmuggle');
     try {
       fs.watch(xdir, { recursive: true }, () => {
         try { win.webContents.send('images-updated', getDesktopImages()); } catch {}
