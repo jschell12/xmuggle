@@ -35,11 +35,18 @@ var (
 	activeTasksMu sync.Mutex
 )
 
+type ProjectConfig struct {
+	LocalPath    string   `json:"localPath"`
+	PostCommands []string `json:"postCommands"`
+}
+
 type Config struct {
-	Interval     int    `json:"interval"`
-	QueueRepo    string `json:"queueRepo"`
-	MaxWorkers   int    `json:"maxWorkers"`
-	AQScriptsDir string `json:"aqScriptsDir"`
+	Interval     int                      `json:"interval"`
+	QueueRepo    string                   `json:"queueRepo"`
+	MaxWorkers   int                      `json:"maxWorkers"`
+	AQScriptsDir string                   `json:"aqScriptsDir"`
+	PostCommands []string                 `json:"postCommands"`
+	Projects     map[string]ProjectConfig `json:"projects"`
 }
 
 func defaultConfig() Config {
@@ -471,7 +478,60 @@ func runWorker(cfg Config, m *taskMeta, taskID, taskDir string) {
 		logf("  [%s] Merged to main via agent-merge", taskID)
 	}
 
+	runPostCommands(cfg, m.Project, cloneDir, taskID)
 	markDone(m, metaFile, taskID, result)
+}
+
+// runPostCommands runs post-completion commands for a project.
+// It looks up project-specific config first, falling back to global postCommands.
+// If a localPath is configured, it runs git pull there first, then commands in that dir.
+// Otherwise commands run in the clone dir.
+func runPostCommands(cfg Config, project, cloneDir, taskID string) {
+	// Resolve project config: try full project name, then base name
+	var pc ProjectConfig
+	var found bool
+	if cfg.Projects != nil {
+		pc, found = cfg.Projects[project]
+		if !found {
+			pc, found = cfg.Projects[filepath.Base(project)]
+		}
+	}
+
+	// Determine which commands to run
+	commands := pc.PostCommands
+	if len(commands) == 0 {
+		commands = cfg.PostCommands
+	}
+
+	// Determine working directory
+	runDir := cloneDir
+	if pc.LocalPath != "" {
+		runDir = pc.LocalPath
+		// Pull latest into local path first
+		logf("  [%s] Pulling latest into %s", taskID, runDir)
+		if out, err := runGit(runDir, "pull", "--rebase"); err != nil {
+			logf("  [%s] git pull failed in %s: %s", taskID, runDir, out)
+			return
+		}
+	}
+
+	if len(commands) == 0 {
+		return
+	}
+
+	for _, cmdStr := range commands {
+		logf("  [%s] Running post-command: %s", taskID, cmdStr)
+		cmd := exec.Command("sh", "-c", cmdStr)
+		cmd.Dir = runDir
+		cmd.Env = gitEnv()
+		out, err := cmd.CombinedOutput()
+		outStr := strings.TrimSpace(string(out))
+		if err != nil {
+			logf("  [%s] Post-command failed: %s\n%s", taskID, err, outStr)
+		} else if outStr != "" {
+			logf("  [%s] Post-command output: %s", taskID, outStr)
+		}
+	}
 }
 
 func markDone(m *taskMeta, metaFile, taskID, result string) {
@@ -597,6 +657,21 @@ func main() {
 		fmt.Printf("MaxWorkers:  %d\n", cfg.MaxWorkers)
 		fmt.Printf("Queue repo:  %s\n", orDefault(cfg.QueueRepo, "(none)"))
 		fmt.Printf("AQ scripts:  %s\n", cfg.AQScriptsDir)
+		if len(cfg.PostCommands) > 0 {
+			fmt.Printf("Post cmds:   %s\n", strings.Join(cfg.PostCommands, "; "))
+		}
+		if len(cfg.Projects) > 0 {
+			fmt.Printf("Projects:    %d configured\n", len(cfg.Projects))
+			for name, pc := range cfg.Projects {
+				fmt.Printf("  %s:\n", name)
+				if pc.LocalPath != "" {
+					fmt.Printf("    localPath:    %s\n", pc.LocalPath)
+				}
+				if len(pc.PostCommands) > 0 {
+					fmt.Printf("    postCommands: %s\n", strings.Join(pc.PostCommands, "; "))
+				}
+			}
+		}
 
 	case "config":
 		ensureConfig()
