@@ -290,7 +290,7 @@ settingsBtn.addEventListener('click', async () => {
   const hasToken = await window.xmuggle.hasGhToken();
   const daemon = await window.xmuggle.daemonStatus();
   const daemonCfg = await window.xmuggle.getDaemonConfig();
-  const repos = daemonCfg.repos || [];
+  const repos = (daemonCfg.repos || []).filter(r => r.path);
 
   const modal = document.createElement('div');
   modal.id = 'settings-modal';
