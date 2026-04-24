@@ -167,12 +167,8 @@ func syncQueue() bool {
 	if _, err := os.Stat(gitDir); err != nil {
 		return false
 	}
-	if out, err := runGit(queueDir, "fetch", "origin", "main"); err != nil {
-		logf("Queue fetch failed: %s", out)
-		return false
-	}
-	if out, err := runGit(queueDir, "reset", "--hard", "origin/main"); err != nil {
-		logf("Queue reset failed: %s", out)
+	if out, err := runGit(queueDir, "pull", "--rebase", "origin", "main"); err != nil {
+		logf("Queue pull failed: %s", out)
 		return false
 	}
 	return true
@@ -181,8 +177,7 @@ func syncQueue() bool {
 func queueCommitPush(message string) {
 	runGit(queueDir, "add", "-A")
 	if _, err := runGit(queueDir, "commit", "-m", message); err == nil {
-		runGit(queueDir, "fetch", "origin", "main")
-		runGit(queueDir, "rebase", "origin/main")
+		runGit(queueDir, "pull", "--rebase", "origin", "main")
 		if out, err := runGit(queueDir, "push", "origin", "main"); err != nil {
 			logf("  Queue push failed: %s", out)
 		}
