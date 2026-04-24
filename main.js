@@ -440,6 +440,17 @@ app.whenReady().then(() => {
   ipcMain.handle('daemon-stop', () => daemonStop());
   ipcMain.handle('daemon-log', (_, lines) => getDaemonLog(lines || 50));
 
+  // Daemon config (repos + postCommands)
+  const DAEMON_CONFIG_FILE = path.join(XMUGGLE_DIR, 'daemon.json');
+  ipcMain.handle('get-daemon-config', () => {
+    try { return JSON.parse(fs.readFileSync(DAEMON_CONFIG_FILE, 'utf8')); } catch { return {}; }
+  });
+  ipcMain.handle('set-daemon-config', (_, cfg) => {
+    fs.mkdirSync(XMUGGLE_DIR, { recursive: true });
+    fs.writeFileSync(DAEMON_CONFIG_FILE, JSON.stringify(cfg, null, 2) + '\n');
+    return true;
+  });
+
   // Relay
   ipcMain.handle('get-relay-host', () => api.getRelayHost());
   ipcMain.handle('set-relay-host', (_, host) => { api.setRelayHost(host); return true; });

@@ -23,6 +23,8 @@ contextBridge.exposeInMainWorld('xmuggle', {
   daemonStart: () => ipcRenderer.invoke('daemon-start'),
   daemonStop: () => ipcRenderer.invoke('daemon-stop'),
   daemonLog: (lines) => ipcRenderer.invoke('daemon-log', lines),
+  getDaemonConfig: () => ipcRenderer.invoke('get-daemon-config'),
+  setDaemonConfig: (cfg) => ipcRenderer.invoke('set-daemon-config', cfg),
   onImagesUpdated: (callback) => {
     ipcRenderer.on('images-updated', (_, images) => callback(images));
   },

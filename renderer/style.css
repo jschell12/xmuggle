@@ -760,6 +760,41 @@ header h1 {
   font-family: "SF Mono", "Menlo", "Monaco", monospace;
 }
 
+.settings-repo-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+  align-items: center;
+}
+
+.settings-repo-row .repo-path {
+  flex: 1;
+  background: #1a1a2e;
+  border: 1px solid #0f3460;
+  color: #e0e0e0;
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: "SF Mono", "Menlo", monospace;
+}
+
+.settings-repo-row .repo-cmds {
+  flex: 1;
+  background: #1a1a2e;
+  border: 1px solid #0f3460;
+  color: #e0e0e0;
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: "SF Mono", "Menlo", monospace;
+}
+
+.settings-repo-row .repo-path:focus,
+.settings-repo-row .repo-cmds:focus {
+  outline: none;
+  border-color: #e94560;
+}
+
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }

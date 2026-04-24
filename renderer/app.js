@@ -289,6 +289,8 @@ settingsBtn.addEventListener('click', async () => {
   const queueUrl = await window.xmuggle.getQueueUrl();
   const hasToken = await window.xmuggle.hasGhToken();
   const daemon = await window.xmuggle.daemonStatus();
+  const daemonCfg = await window.xmuggle.getDaemonConfig();
+  const repos = daemonCfg.repos || [];
 
   const modal = document.createElement('div');
   modal.id = 'settings-modal';
@@ -316,6 +318,12 @@ settingsBtn.addEventListener('click', async () => {
         <input type="password" id="settings-gh-token" value="" placeholder="${hasToken ? 'Leave blank to keep current' : 'ghp_...'}">
         <div class="settings-hint">Used for git push auth. Leave blank to keep current value.</div>
       </div>
+      <div class="settings-field">
+        <label>Repos &amp; Post Commands</label>
+        <div id="settings-repos"></div>
+        <button id="settings-add-repo" class="link-btn" style="margin-top:6px;">+ Add repo</button>
+        <div class="settings-hint">After a task completes, pull changes and run commands in the local repo</div>
+      </div>
       <div class="modal-actions">
         <button id="settings-cancel" class="link-btn">Cancel</button>
         ${hasToken ? '<button id="settings-reset-token" class="link-btn" style="color:#d63031;">Reset Token</button>' : ''}
@@ -325,6 +333,39 @@ settingsBtn.addEventListener('click', async () => {
   `;
   document.body.appendChild(modal);
   document.getElementById('settings-queue-url').value = queueUrl || '';
+
+  // Render repos list
+  const reposContainer = document.getElementById('settings-repos');
+  function renderRepos() {
+    reposContainer.innerHTML = '';
+    repos.forEach((repo, i) => {
+      const row = document.createElement('div');
+      row.className = 'settings-repo-row';
+      row.innerHTML = `
+        <input type="text" class="repo-path" value="${repo.path || ''}" placeholder="/path/to/repo">
+        <input type="text" class="repo-cmds" value="${(repo.postCommands || []).join('; ')}" placeholder="make build; make install">
+        <button class="repo-remove link-btn" style="color:#d63031;padding:4px 6px;">×</button>
+      `;
+      row.querySelector('.repo-path').addEventListener('change', (e) => {
+        repos[i].path = e.target.value.trim();
+      });
+      row.querySelector('.repo-cmds').addEventListener('change', (e) => {
+        const val = e.target.value.trim();
+        repos[i].postCommands = val ? val.split(';').map(s => s.trim()).filter(Boolean) : [];
+      });
+      row.querySelector('.repo-remove').addEventListener('click', () => {
+        repos.splice(i, 1);
+        renderRepos();
+      });
+      reposContainer.appendChild(row);
+    });
+  }
+  renderRepos();
+
+  document.getElementById('settings-add-repo').addEventListener('click', () => {
+    repos.push({ path: '', postCommands: [] });
+    renderRepos();
+  });
 
   modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
   document.getElementById('settings-cancel').addEventListener('click', () => modal.remove());
@@ -397,6 +438,11 @@ settingsBtn.addEventListener('click', async () => {
     if (newToken) {
       await window.xmuggle.setGhToken(newToken);
     }
+
+    // Save repos config
+    const validRepos = repos.filter(r => r.path);
+    daemonCfg.repos = validRepos;
+    await window.xmuggle.setDaemonConfig(daemonCfg);
 
     modal.remove();
     showToast('Settings saved', false);

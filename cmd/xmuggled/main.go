@@ -35,18 +35,17 @@ var (
 	activeTasksMu sync.Mutex
 )
 
-type ProjectConfig struct {
-	LocalPath    string   `json:"localPath"`
-	PostCommands []string `json:"postCommands"`
+type RepoConfig struct {
+	Path         string   `json:"path"`
+	PostCommands []string `json:"postCommands,omitempty"`
 }
 
 type Config struct {
-	Interval     int                      `json:"interval"`
-	QueueRepo    string                   `json:"queueRepo"`
-	MaxWorkers   int                      `json:"maxWorkers"`
-	AQScriptsDir string                   `json:"aqScriptsDir"`
-	PostCommands []string                 `json:"postCommands"`
-	Projects     map[string]ProjectConfig `json:"projects"`
+	Interval     int          `json:"interval"`
+	QueueRepo    string       `json:"queueRepo"`
+	MaxWorkers   int          `json:"maxWorkers"`
+	AQScriptsDir string       `json:"aqScriptsDir"`
+	Repos        []RepoConfig `json:"repos,omitempty"`
 }
 
 func defaultConfig() Config {
@@ -478,58 +477,55 @@ func runWorker(cfg Config, m *taskMeta, taskID, taskDir string) {
 		logf("  [%s] Merged to main via agent-merge", taskID)
 	}
 
-	runPostCommands(cfg, m.Project, cloneDir, taskID)
+	// Pull changes and run post-commands in the local repo
+	runPostTaskCommands(cfg, m.Project, taskID)
+
 	markDone(m, metaFile, taskID, result)
 }
 
-// runPostCommands runs post-completion commands for a project.
-// It looks up project-specific config first, falling back to global postCommands.
-// If a localPath is configured, it runs git pull there first, then commands in that dir.
-// Otherwise commands run in the clone dir.
-func runPostCommands(cfg Config, project, cloneDir, taskID string) {
-	// Resolve project config: try full project name, then base name
-	var pc ProjectConfig
-	var found bool
-	if cfg.Projects != nil {
-		pc, found = cfg.Projects[project]
-		if !found {
-			pc, found = cfg.Projects[filepath.Base(project)]
+// findRepoConfig matches a task's project (e.g. "jschell12/ai-enhance") to a
+// configured repo by checking if the repo path ends with the project name.
+func findRepoConfig(cfg Config, project string) *RepoConfig {
+	projectName := filepath.Base(project)
+	for i := range cfg.Repos {
+		if filepath.Base(cfg.Repos[i].Path) == projectName {
+			return &cfg.Repos[i]
 		}
 	}
+	return nil
+}
 
-	// Determine which commands to run
-	commands := pc.PostCommands
-	if len(commands) == 0 {
-		commands = cfg.PostCommands
-	}
-
-	// Determine working directory
-	runDir := cloneDir
-	if pc.LocalPath != "" {
-		runDir = pc.LocalPath
-		// Pull latest into local path first
-		logf("  [%s] Pulling latest into %s", taskID, runDir)
-		if out, err := runGit(runDir, "pull", "--rebase"); err != nil {
-			logf("  [%s] git pull failed in %s: %s", taskID, runDir, out)
-			return
-		}
-	}
-
-	if len(commands) == 0 {
+// runPostTaskCommands pulls the latest changes into the local repo and runs
+// any configured post-commands (e.g. make build, make install).
+func runPostTaskCommands(cfg Config, project, taskID string) {
+	rc := findRepoConfig(cfg, project)
+	if rc == nil || rc.Path == "" {
 		return
 	}
 
-	for _, cmdStr := range commands {
-		logf("  [%s] Running post-command: %s", taskID, cmdStr)
-		cmd := exec.Command("sh", "-c", cmdStr)
-		cmd.Dir = runDir
-		cmd.Env = gitEnv()
+	// Check local path exists
+	if _, err := os.Stat(rc.Path); err != nil {
+		logf("  [%s] Post-task: local path %s not found, skipping", taskID, rc.Path)
+		return
+	}
+
+	// Pull latest changes
+	logf("  [%s] Post-task: git pull --rebase in %s", taskID, rc.Path)
+	if out, err := runGit(rc.Path, "pull", "--rebase"); err != nil {
+		logf("  [%s] Post-task: git pull failed: %s", taskID, out)
+	}
+
+	// Run post-commands
+	for _, cmdStr := range rc.PostCommands {
+		logf("  [%s] Post-task: running %q in %s", taskID, cmdStr, rc.Path)
+		cmd := exec.Command("bash", "-c", cmdStr)
+		cmd.Dir = rc.Path
+		cmd.Env = os.Environ()
 		out, err := cmd.CombinedOutput()
-		outStr := strings.TrimSpace(string(out))
 		if err != nil {
-			logf("  [%s] Post-command failed: %s\n%s", taskID, err, outStr)
-		} else if outStr != "" {
-			logf("  [%s] Post-command output: %s", taskID, outStr)
+			logf("  [%s] Post-task: %q failed: %s", taskID, cmdStr, strings.TrimSpace(string(out)))
+		} else {
+			logf("  [%s] Post-task: %q succeeded", taskID, cmdStr)
 		}
 	}
 }
@@ -657,18 +653,12 @@ func main() {
 		fmt.Printf("MaxWorkers:  %d\n", cfg.MaxWorkers)
 		fmt.Printf("Queue repo:  %s\n", orDefault(cfg.QueueRepo, "(none)"))
 		fmt.Printf("AQ scripts:  %s\n", cfg.AQScriptsDir)
-		if len(cfg.PostCommands) > 0 {
-			fmt.Printf("Post cmds:   %s\n", strings.Join(cfg.PostCommands, "; "))
-		}
-		if len(cfg.Projects) > 0 {
-			fmt.Printf("Projects:    %d configured\n", len(cfg.Projects))
-			for name, pc := range cfg.Projects {
-				fmt.Printf("  %s:\n", name)
-				if pc.LocalPath != "" {
-					fmt.Printf("    localPath:    %s\n", pc.LocalPath)
-				}
-				if len(pc.PostCommands) > 0 {
-					fmt.Printf("    postCommands: %s\n", strings.Join(pc.PostCommands, "; "))
+		if len(cfg.Repos) > 0 {
+			fmt.Printf("Repos:\n")
+			for _, r := range cfg.Repos {
+				fmt.Printf("  %s\n", r.Path)
+				for _, c := range r.PostCommands {
+					fmt.Printf("    post: %s\n", c)
 				}
 			}
 		}
@@ -735,6 +725,11 @@ Usage:
   xmuggled set-queue <repo-url>    Set queue repo URL
 
 Config: ~/.xmuggle/daemon.json
+
+Repo config example (daemon.json):
+  "repos": [
+    {"path": "/path/to/local/repo", "postCommands": ["make build"]}
+  ]
 `)
 	}
 }
