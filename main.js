@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, powerMonitor } = require('electron');
 const http = require('http');
 const { execSync, exec } = require('child_process');
 const path = require('path');
@@ -637,6 +637,14 @@ app.whenReady().then(() => {
       win.webContents.send('images-updated', images);
     } catch {}
   }, 10_000);
+
+  // Immediately sync when system wakes from sleep
+  powerMonitor.on('resume', () => {
+    try {
+      const images = getDesktopImages();
+      win.webContents.send('images-updated', images);
+    } catch {}
+  });
 
 });
 
