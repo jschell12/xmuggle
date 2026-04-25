@@ -205,6 +205,12 @@ func syncQueue() bool {
 	if _, err := os.Stat(gitDir); err != nil {
 		return false
 	}
+	// Hold queueMu so we don't race with queueCommitPushSafe in worker
+	// goroutines.  Without this, reset --hard can destroy a worker's
+	// unpushed "done" commit, causing the sender to never see the
+	// completion and never run post-task commands.
+	queueMu.Lock()
+	defer queueMu.Unlock()
 	if out, err := runGit(queueDir, "fetch", "origin", "main"); err != nil {
 		logf("Queue fetch failed: %s", out)
 		return false
