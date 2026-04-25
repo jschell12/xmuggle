@@ -319,17 +319,17 @@ settingsBtn.addEventListener('click', async () => {
         <div class="settings-hint">Used for git push auth. Leave blank to keep current value.</div>
       </div>
       <div class="settings-field">
+        <label>Repos &amp; Post Commands</label>
+        <div id="settings-repos"></div>
+        <div class="settings-hint">After a task completes, pull changes and run these commands in the local repo. Add projects above to see them here.</div>
+      </div>
+      <div class="settings-field">
         <label>AI CLI</label>
         <select id="settings-ai-cli">
           <option value="claude">Claude</option>
           <option value="cursor">Cursor</option>
         </select>
         <div class="settings-hint">Which AI CLI to use for processing tasks (can override per repo)</div>
-      </div>
-      <div class="settings-field">
-        <label>Repos &amp; Post Commands</label>
-        <div id="settings-repos"></div>
-        <div class="settings-hint">After a task completes, pull changes and run these commands in the local repo. Add projects above to see them here.</div>
       </div>
       <div class="modal-actions">
         <button id="settings-cancel" class="link-btn">Cancel</button>
@@ -453,8 +453,9 @@ settingsBtn.addEventListener('click', async () => {
       await window.xmuggle.setGhToken(newToken);
     }
 
-    // Save AI CLI + repos config
+    // Save AI CLI + repos config + queue URL into daemon config
     daemonCfg.aiCli = document.getElementById('settings-ai-cli').value;
+    daemonCfg.queueRepo = document.getElementById('settings-queue-url').value.trim() || queueUrl || '';
     const validRepos = repos.filter(r => r.path);
     daemonCfg.repos = validRepos;
     await window.xmuggle.setDaemonConfig(daemonCfg);

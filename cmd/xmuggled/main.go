@@ -98,6 +98,13 @@ func loadConfig() Config {
 	if cfg.AICli == "" {
 		cfg.AICli = "claude"
 	}
+	// Fall back to queue-url file if queueRepo not set in daemon.json
+	if cfg.QueueRepo == "" {
+		queueURLFile := filepath.Join(xmuggleDir, "queue-url")
+		if data, err := os.ReadFile(queueURLFile); err == nil {
+			cfg.QueueRepo = strings.TrimSpace(string(data))
+		}
+	}
 	return cfg
 }
 
