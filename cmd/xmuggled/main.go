@@ -287,8 +287,25 @@ func ensureQueueClone(cfg Config) bool {
 	return syncQueue()
 }
 
-// Track tasks we've already run post-commands for
-var postCmdDone = make(map[string]bool)
+// Track tasks we've already run post-commands for (persisted to disk).
+var postCmdDoneFile = filepath.Join(homeDir(), ".xmuggle", "post-cmd-done.json")
+
+func loadPostCmdDone() map[string]bool {
+	data, err := os.ReadFile(postCmdDoneFile)
+	if err != nil {
+		return make(map[string]bool)
+	}
+	var m map[string]bool
+	if err := json.Unmarshal(data, &m); err != nil {
+		return make(map[string]bool)
+	}
+	return m
+}
+
+func savePostCmdDone(m map[string]bool) {
+	data, _ := json.Marshal(m)
+	_ = os.WriteFile(postCmdDoneFile, data, 0644)
+}
 
 func processQueue(cfg Config) {
 	if !ensureQueueClone(cfg) {
@@ -302,6 +319,7 @@ func processQueue(cfg Config) {
 	}
 
 	host := hostname()
+	postCmdDone := loadPostCmdDone()
 
 	// First pass: run post-commands for our tasks that completed
 	for _, entry := range entries {
@@ -320,6 +338,7 @@ func processQueue(cfg Config) {
 		// Only run post-commands for tasks WE sent that are now done
 		if m.From == host && m.Status == "done" {
 			postCmdDone[taskID] = true
+			savePostCmdDone(postCmdDone)
 			logf("  [%s] Task completed by %s, running post-commands", taskID, m.ProcessedBy)
 			runPostTaskCommands(cfg, m.Project, taskID)
 		}
