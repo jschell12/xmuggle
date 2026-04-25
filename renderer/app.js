@@ -417,13 +417,14 @@ settingsBtn.addEventListener('click', async () => {
     logModal.innerHTML = `
       <div class="modal" style="max-width:700px;max-height:80vh;overflow-y:auto;">
         <div class="modal-title">Daemon Log</div>
-        <pre class="daemon-log-content">${logText || 'No log output'}</pre>
+        <pre class="daemon-log-content"></pre>
         <div class="modal-actions">
           <button id="daemon-log-refresh" class="link-btn">Refresh</button>
           <button id="daemon-log-close" class="modal-send-btn">Close</button>
         </div>
       </div>
     `;
+    logModal.querySelector('.daemon-log-content').textContent = logText || 'No log output';
     document.body.appendChild(logModal);
     logModal.addEventListener('click', (e) => { if (e.target === logModal) logModal.remove(); });
     document.getElementById('daemon-log-close').addEventListener('click', () => logModal.remove());
@@ -518,13 +519,15 @@ function showResultModal(img) {
   modal.innerHTML = `
     <div class="modal" style="max-width:600px;max-height:80vh;overflow-y:auto;">
       <div class="modal-title">Result</div>
-      <div class="modal-subtitle">${img.name} \u2192 ${img.projectPath ? img.projectPath.split('/').pop() : ''}</div>
-      <pre class="result-text">${filterClaudeLog(img.result) || 'No result'}</pre>
+      <div class="modal-subtitle"></div>
+      <pre class="result-text"></pre>
       <div class="modal-actions">
         <button id="result-close" class="modal-send-btn">Close</button>
       </div>
     </div>
   `;
+  modal.querySelector('.modal-subtitle').textContent = `${img.name} \u2192 ${img.projectPath ? img.projectPath.split('/').pop() : ''}`;
+  modal.querySelector('.result-text').textContent = filterClaudeLog(img.result) || 'No result';
   document.body.appendChild(modal);
   modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
   document.getElementById('result-close').addEventListener('click', () => modal.remove());
@@ -548,7 +551,7 @@ function render(images) {
   count.textContent = `${total} items \u2022 ${pending} new \u2022 ${inProgress} in progress \u2022 ${done} done \u2022 ${label}`;
 
   for (const img of filtered) {
-    const isProcessing = processingSet.has(img.path);
+    const isProcessing = processingSet.has(img.path) || img.status === 'processing';
     const isText = img.type === 'text';
     const card = document.createElement('div');
     card.className = 'card'

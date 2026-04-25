@@ -285,7 +285,7 @@ function queuePush(imagePaths, projectPath, message) {
 
   execSync('git add -A', { cwd: queueDir, stdio: 'pipe' });
   const commitMsg = `xmuggle: ${project} — ${filenames.join(', ')}`;
-  execSync(`git commit -m "${commitMsg.replace(/"/g, '\\"')}"`, { cwd: queueDir, stdio: 'pipe' });
+  execSync('git commit -m ' + JSON.stringify(commitMsg), { cwd: queueDir, stdio: 'pipe' });
   execSync('git push', { cwd: queueDir, stdio: 'pipe', env });
 
   return { status: 'queued', id, project };
