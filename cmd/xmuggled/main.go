@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -777,6 +778,19 @@ func runPostTaskCommands(cfg Config, project, taskID string) {
 	postCmdProcs.Lock()
 	postCmdProcs.m[rc.Path] = newProcs
 	postCmdProcs.Unlock()
+
+	// Signal the xmuggle Electron app to reload its UI
+	reloadXmuggleUI(taskID)
+}
+
+func reloadXmuggleUI(taskID string) {
+	resp, err := http.Post("http://localhost:24816/reload", "application/json", nil)
+	if err != nil {
+		logf("  [%s] Post-task: UI reload skipped (app not running)", taskID)
+		return
+	}
+	resp.Body.Close()
+	logf("  [%s] Post-task: UI reloaded", taskID)
 }
 
 func markDone(m *taskMeta, metaFile, taskID, result string) {

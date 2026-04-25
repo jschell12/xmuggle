@@ -571,6 +571,18 @@ app.whenReady().then(() => {
       return;
     }
 
+    if (req.method === 'POST' && req.url === '/reload') {
+      try {
+        win.webContents.reload();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'reloaded' }));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+      return;
+    }
+
     if (req.method === 'POST' && req.url === '/submit') {
       let body = [];
       req.on('data', chunk => body.push(chunk));
