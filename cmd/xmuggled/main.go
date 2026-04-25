@@ -389,6 +389,7 @@ func runWorker(cfg Config, m *taskMeta, taskID, taskDir string) {
 
 	// Build prompt
 	var promptParts []string
+	promptParts = append(promptParts, "You are a code fix agent. Your job is to read the code in this repo, understand the issue described below, and fix it by editing files directly. Do not ask questions. Do not use xmuggle or any external tools. Just read the code, make the fix, and commit nothing — the caller handles git.")
 	if len(imgPaths) > 0 {
 		promptParts = append(promptParts,
 			fmt.Sprintf("Analyze the screenshot(s) at %s and fix any bugs or UI issues you find in this repo.", strings.Join(imgPaths, ", ")))
