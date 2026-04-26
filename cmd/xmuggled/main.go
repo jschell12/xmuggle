@@ -56,6 +56,7 @@ type Config struct {
 	MaxWorkers   int          `json:"maxWorkers"`
 	AQScriptsDir string       `json:"aqScriptsDir"`
 	AICli        string       `json:"aiCli"`
+	LogLevel     string       `json:"logLevel"` // trace, debug, info, warn, error
 	Repos        []RepoConfig `json:"repos,omitempty"`
 }
 
@@ -64,6 +65,7 @@ func defaultConfig() Config {
 		Interval:     10,
 		MaxWorkers:   3,
 		AICli:        "claude",
+		LogLevel:     "info",
 		AQScriptsDir: filepath.Join(homeDir(), "development", "github.com", "jschell12", "agent-queue", "scripts"),
 	}
 }
@@ -152,7 +154,42 @@ func ensureConfig() {
 
 // ── Logging ──
 
-var logWriter *os.File
+const (
+	LevelTrace = iota
+	LevelDebug
+	LevelInfo
+	LevelWarn
+	LevelError
+)
+
+var (
+	logWriter  *os.File
+	logLevel   = LevelInfo
+	levelNames = map[int]string{
+		LevelTrace: "TRACE",
+		LevelDebug: "DEBUG",
+		LevelInfo:  "INFO",
+		LevelWarn:  "WARN",
+		LevelError: "ERROR",
+	}
+)
+
+func parseLogLevel(s string) int {
+	switch strings.ToLower(s) {
+	case "trace":
+		return LevelTrace
+	case "debug":
+		return LevelDebug
+	case "info":
+		return LevelInfo
+	case "warn", "warning":
+		return LevelWarn
+	case "error":
+		return LevelError
+	default:
+		return LevelInfo
+	}
+}
 
 func setupLog() {
 	_ = os.MkdirAll(xmuggleDir, 0755)
@@ -164,11 +201,21 @@ func setupLog() {
 	log.SetFlags(log.Ldate | log.Ltime)
 }
 
-func logf(format string, args ...any) {
-	msg := fmt.Sprintf(format, args...)
+func logAt(level int, format string, args ...any) {
+	if level < logLevel {
+		return
+	}
+	prefix := levelNames[level]
+	msg := fmt.Sprintf("[%s] %s", prefix, fmt.Sprintf(format, args...))
 	log.Println(msg)
 	fmt.Println(msg)
 }
+
+func trace(format string, args ...any) { logAt(LevelTrace, format, args...) }
+func debug(format string, args ...any) { logAt(LevelDebug, format, args...) }
+func logf(format string, args ...any)  { logAt(LevelInfo, format, args...) }
+func warn(format string, args ...any)  { logAt(LevelWarn, format, args...) }
+func errorf(format string, args ...any) { logAt(LevelError, format, args...) }
 
 // ── Git ──
 
@@ -176,27 +223,32 @@ func gitEnv() []string {
 	env := os.Environ()
 	tokenFile := filepath.Join(xmuggleDir, "gh-token")
 	token := os.Getenv("GH_TOKEN")
+	source := "env:GH_TOKEN"
 	if token == "" {
 		token = os.Getenv("GITHUB_TOKEN")
+		source = "env:GITHUB_TOKEN"
 	}
 	if token == "" {
 		if data, err := os.ReadFile(tokenFile); err == nil {
 			token = strings.TrimSpace(string(data))
+			source = "file:" + tokenFile
 		}
 	}
 	if token != "" {
+		trace("Git token found via %s (len=%d)", source, len(token))
 		env = append(env,
 			"GH_TOKEN="+token,
 			"GIT_ASKPASS=echo",
 			"GIT_TERMINAL_PROMPT=0",
 		)
+	} else {
+		trace("No git token found")
 	}
 	return env
 }
 
 func runGit(dir string, args ...string) (string, error) {
-	// Recover once from stale .git/index.lock files left behind by crashed git
-	// processes. This keeps queue sync and post-task pulls from getting stuck.
+	trace("git %s (dir=%s)", strings.Join(args, " "), dir)
 	cleanupStaleGitIndexLock(dir)
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
@@ -204,11 +256,17 @@ func runGit(dir string, args ...string) (string, error) {
 	out, err := cmd.CombinedOutput()
 	trimmed := strings.TrimSpace(string(out))
 	if err != nil && isIndexLockError(trimmed) && cleanupStaleGitIndexLock(dir) {
+		warn("Retrying git after stale lock cleanup: %s", strings.Join(args, " "))
 		retry := exec.Command("git", args...)
 		retry.Dir = dir
 		retry.Env = gitEnv()
 		out, err = retry.CombinedOutput()
 		trimmed = strings.TrimSpace(string(out))
+	}
+	if err != nil {
+		trace("git %s failed: %s", args[0], trimmed)
+	} else {
+		trace("git %s ok: %s", args[0], truncate(trimmed, 200))
 	}
 	return trimmed, err
 }
@@ -280,38 +338,45 @@ func writeTaskMeta(metaFile string, m *taskMeta) error {
 }
 
 func syncQueue() bool {
+	debug("Syncing queue repo")
 	gitDir := filepath.Join(queueDir, ".git")
 	if _, err := os.Stat(gitDir); err != nil {
+		warn("Queue repo not found at %s", queueDir)
 		return false
 	}
-	// Hold queueMu so we don't race with queueCommitPushSafe in worker
-	// goroutines.  Without this, reset --hard can destroy a worker's
-	// unpushed "done" commit, causing the sender to never see the
-	// completion and never run post-task commands.
 	queueMu.Lock()
 	defer queueMu.Unlock()
 	if out, err := runGit(queueDir, "fetch", "origin", "main"); err != nil {
-		logf("Queue fetch failed: %s", out)
+		errorf("Queue fetch failed: %s", out)
 		return false
 	}
 	if out, err := runGit(queueDir, "reset", "--hard", "FETCH_HEAD"); err != nil {
-		logf("Queue reset failed: %s", out)
+		errorf("Queue reset failed: %s", out)
 		return false
 	}
+	debug("Queue synced")
 	return true
 }
 
 // queueCommitPushSafe wraps queue git ops in a mutex for concurrent workers.
 func queueCommitPushSafe(message string) {
+	debug("Queue commit+push: %s", message)
 	queueMu.Lock()
 	defer queueMu.Unlock()
 	runGit(queueDir, "add", "-A")
 	if _, err := runGit(queueDir, "commit", "-m", message); err == nil {
+		debug("Queue commit ok, fetching before push")
 		runGit(queueDir, "fetch", "origin", "main")
-		runGit(queueDir, "rebase", "FETCH_HEAD")
-		if out, err := runGit(queueDir, "push", "origin", "main"); err != nil {
-			logf("  Queue push failed: %s", out)
+		if out, err := runGit(queueDir, "rebase", "FETCH_HEAD"); err != nil {
+			warn("Queue rebase failed: %s", out)
 		}
+		if out, err := runGit(queueDir, "push", "origin", "main"); err != nil {
+			errorf("Queue push failed: %s", out)
+		} else {
+			debug("Queue pushed: %s", message)
+		}
+	} else {
+		trace("Queue commit skipped (nothing to commit): %s", message)
 	}
 }
 
@@ -355,6 +420,7 @@ func savePostCmdDone(m map[string]bool) {
 }
 
 func processQueue(cfg Config) {
+	trace("processQueue: starting cycle")
 	if !ensureQueueClone(cfg) {
 		return
 	}
@@ -362,11 +428,14 @@ func processQueue(cfg Config) {
 	pendingDir := filepath.Join(queueDir, "pending")
 	entries, err := os.ReadDir(pendingDir)
 	if err != nil {
+		warn("Cannot read pending dir: %v", err)
 		return
 	}
 
 	host := hostname()
 	postCmdDone := loadPostCmdDone()
+	debug("processQueue: %d entries in pending/, host=%s, postCmdDone=%d tracked",
+		len(entries), host, len(postCmdDone))
 
 	// First pass: run post-commands for our tasks that completed
 	for _, entry := range entries {
@@ -375,23 +444,29 @@ func processQueue(cfg Config) {
 		}
 		taskID := entry.Name()
 		if postCmdDone[taskID] {
+			trace("  [%s] Already ran post-commands, skipping", taskID)
 			continue
 		}
 		metaFile := filepath.Join(pendingDir, taskID, "meta.json")
 		m, err := readTaskMeta(metaFile)
 		if err != nil {
+			trace("  [%s] Cannot read meta.json: %v", taskID, err)
 			continue
 		}
+		debug("  [%s] from=%s status=%s project=%s aiCli=%s", taskID, m.From, m.Status, m.Project, m.AICli)
 		// Only run post-commands for tasks WE sent that are now done
 		if m.From == host && m.Status == "done" {
 			postCmdDone[taskID] = true
 			savePostCmdDone(postCmdDone)
 			logf("  [%s] Task completed by %s, running post-commands", taskID, m.ProcessedBy)
 			runPostTaskCommands(cfg, m.Project, taskID)
+		} else if m.From == host && m.Status != "done" {
+			debug("  [%s] Our task, status=%s (waiting)", taskID, m.Status)
 		}
 	}
 
 	// Second pass: dispatch pending tasks from other hosts
+	debug("processQueue: scanning for dispatchable tasks")
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -403,6 +478,7 @@ func processQueue(cfg Config) {
 		activeTasksMu.Lock()
 		if activeTasks[taskID] {
 			activeTasksMu.Unlock()
+			trace("  [%s] Already active, skipping", taskID)
 			continue
 		}
 		activeTasksMu.Unlock()
@@ -412,16 +488,22 @@ func processQueue(cfg Config) {
 
 		m, err := readTaskMeta(metaFile)
 		if err != nil {
+			trace("  [%s] Cannot read meta: %v", taskID, err)
 			continue
 		}
 
 		if m.Status != "pending" {
+			trace("  [%s] Status=%s, skipping", taskID, m.Status)
 			continue
 		}
 
 		if m.From == host {
+			trace("  [%s] From self, skipping", taskID)
 			continue
 		}
+
+		debug("  [%s] Found pending task: project=%s from=%s msg=%s aiCli=%s files=%v",
+			taskID, m.Project, m.From, truncate(m.Message, 50), m.AICli, m.Filenames)
 
 		// Try to acquire a worker slot
 		select {
@@ -943,10 +1025,19 @@ func main() {
 	case "_run-daemon":
 		setupLog()
 		cfg := loadConfig()
+		logLevel = parseLogLevel(cfg.LogLevel)
 		workerSem = make(chan struct{}, cfg.MaxWorkers)
 		_ = os.MkdirAll(xmuggleDir, 0755)
 		_ = os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0644)
-		logf("Daemon starting (pid %d, interval %ds, maxWorkers %d)", os.Getpid(), cfg.Interval, cfg.MaxWorkers)
+		logf("Daemon starting (pid %d, interval %ds, maxWorkers %d, logLevel %s, aiCli %s)",
+			os.Getpid(), cfg.Interval, cfg.MaxWorkers, cfg.LogLevel, cfg.AICli)
+		debug("Config: %+v", cfg)
+		debug("Queue repo: %s", cfg.QueueRepo)
+		debug("AQ scripts: %s", cfg.AQScriptsDir)
+		debug("Hostname: %s", hostname())
+		for _, r := range cfg.Repos {
+			debug("Repo: %s (aiCli=%s, postCmds=%v)", r.Path, r.AICli, r.PostCommands)
+		}
 
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
@@ -973,8 +1064,9 @@ func main() {
 		ensureConfig()
 		setupLog()
 		cfg := loadConfig()
+		logLevel = parseLogLevel(cfg.LogLevel)
 		workerSem = make(chan struct{}, cfg.MaxWorkers)
-		logf("Running single cycle (maxWorkers %d)", cfg.MaxWorkers)
+		logf("Running single cycle (maxWorkers %d, logLevel %s)", cfg.MaxWorkers, cfg.LogLevel)
 		runCycle()
 		logf("Waiting for workers...")
 		activeWorkers.Wait()
@@ -1004,6 +1096,7 @@ func main() {
 		fmt.Printf("Config:      %s\n", configFile)
 		fmt.Printf("Interval:    %ds\n", cfg.Interval)
 		fmt.Printf("MaxWorkers:  %d\n", cfg.MaxWorkers)
+		fmt.Printf("LogLevel:    %s\n", orDefault(cfg.LogLevel, "info"))
 		fmt.Printf("Queue repo:  %s\n", orDefault(cfg.QueueRepo, "(none)"))
 		fmt.Printf("AI CLI:      %s\n", cfg.AICli)
 		fmt.Printf("AQ scripts:  %s\n", cfg.AQScriptsDir)
@@ -1122,6 +1215,13 @@ func toInt64(v any) int64 {
 		return int64(n)
 	}
 	return 0
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
 
 func orDefault(s, def string) string {
