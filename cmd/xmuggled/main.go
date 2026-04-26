@@ -657,12 +657,12 @@ func runWorker(cfg Config, m *taskMeta, taskID, taskDir string) {
 			queueCommitPushSafe(fmt.Sprintf("requeue (SIGTERM): %s", taskID))
 			return
 		}
-		logf("  [%s] Claude failed: %v", taskID, claudeErr)
-		markError(m, metaFile, taskID, fmt.Sprintf("Claude failed: %v", claudeErr))
+		logf("  [%s] %s failed: %v", taskID, aiCli, claudeErr)
+		markError(m, metaFile, taskID, fmt.Sprintf("%s failed: %v", aiCli, claudeErr))
 		return
 	}
 
-	logf("  [%s] Claude finished", taskID)
+	logf("  [%s] %s finished", taskID, aiCli)
 
 	// Check for changes
 	porcelain, _ := runGit(cloneDir, "status", "--porcelain")
