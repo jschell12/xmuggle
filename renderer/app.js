@@ -356,7 +356,6 @@ settingsBtn.addEventListener('click', async () => {
       const name = repo.path ? repo.path.split('/').pop() : '(unknown)';
       const cmds = (repo.postCommands || []).join('; ');
       const repoCli = repo.aiCli || '';
-      const tmuxSess = repo.tmuxSession || '';
       const row = document.createElement('div');
       row.className = 'settings-repo-row';
       row.innerHTML = `
@@ -367,7 +366,6 @@ settingsBtn.addEventListener('click', async () => {
             <option value="claude" ${repoCli === 'claude' ? 'selected' : ''}>Claude</option>
             <option value="cursor" ${repoCli === 'cursor' ? 'selected' : ''}>Cursor</option>
           </select>
-          <input type="text" class="repo-tmux" value="${tmuxSess}" placeholder="tmux session" title="tmux session name for restart">
         </div>
         <input type="text" class="repo-cmds" value="${cmds}" placeholder="post task commands: make build; make install">
       `;
@@ -377,9 +375,6 @@ settingsBtn.addEventListener('click', async () => {
       });
       row.querySelector('.repo-cli').addEventListener('change', (e) => {
         repos[i].aiCli = e.target.value || undefined;
-      });
-      row.querySelector('.repo-tmux').addEventListener('change', (e) => {
-        repos[i].tmuxSession = e.target.value.trim() || undefined;
       });
       reposContainer.appendChild(row);
     });

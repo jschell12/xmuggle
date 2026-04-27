@@ -48,7 +48,6 @@ type RepoConfig struct {
 	Path         string   `json:"path"`
 	PostCommands []string `json:"postCommands,omitempty"`
 	AICli        string   `json:"aiCli,omitempty"`        // per-repo override: "claude" or "cursor"
-	TmuxSession  string   `json:"tmuxSession,omitempty"`  // tmux session name for restart
 }
 
 type Config struct {
@@ -907,33 +906,8 @@ func runPostTaskCommands(cfg Config, project, taskID string) {
 		return
 	}
 
-	// tmux mode: send Ctrl-C + commands to the user's tmux session.
-	// This runs in the same environment where the user originally started the app.
-	if rc.TmuxSession != "" {
-		logf("  [%s] Post-task: restarting via tmux session %q", taskID, rc.TmuxSession)
-
-		// Check if tmux session exists
-		if err := exec.Command("tmux", "has-session", "-t", rc.TmuxSession).Run(); err != nil {
-			warn("  [%s] Post-task: tmux session %q not found, skipping", taskID, rc.TmuxSession)
-			return
-		}
-
-		// Send Ctrl-C to interrupt the running process
-		debug("  [%s] Post-task: sending Ctrl-C to tmux %q", taskID, rc.TmuxSession)
-		exec.Command("tmux", "send-keys", "-t", rc.TmuxSession, "C-c").Run()
-		time.Sleep(1 * time.Second)
-
-		// Send the restart commands as a single line
-		script := strings.Join(rc.PostCommands, " && ")
-		debug("  [%s] Post-task: sending to tmux: %s", taskID, script)
-		exec.Command("tmux", "send-keys", "-t", rc.TmuxSession, script, "Enter").Run()
-
-		logf("  [%s] Post-task: sent restart commands to tmux %q", taskID, rc.TmuxSession)
-		return
-	}
-
-	// Run post-commands in detached bash (no tmux)
-	debug("  [%s] Post-task: no tmux session, using detached bash", taskID)
+	// Run post-commands in detached bash
+	debug("  [%s] Post-task: running commands in detached bash", taskID)
 
 	if _, err := os.Stat(rc.Path); err != nil {
 		warn("  [%s] Post-task: local path %s not found", taskID, rc.Path)
@@ -1123,11 +1097,7 @@ func main() {
 				if cli == "" {
 					cli = cfg.AICli
 				}
-				tmux := r.TmuxSession
-				if tmux == "" {
-					tmux = "-"
-				}
-				fmt.Printf("  %s (cli: %s, tmux: %s)\n", r.Path, cli, tmux)
+				fmt.Printf("  %s (cli: %s)\n", r.Path, cli)
 				for _, c := range r.PostCommands {
 					fmt.Printf("    post: %s\n", c)
 				}

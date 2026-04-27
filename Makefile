@@ -34,11 +34,3 @@ daemon-status:
 
 log:
 	tail -f $(HOME)/.xmuggle/daemon.log
-
-tmux: ## Run xmuggle UI in a named tmux session (daemon can restart it)
-	tmux kill-session -t xmuggle 2>/dev/null || true
-	tmux new-session -d -s xmuggle -c $(CURDIR) 'npm start'
-	@echo "xmuggle running in tmux session 'xmuggle'. Attach with: make tmux-attach"
-
-tmux-attach: ## Attach to the xmuggle tmux session
-	tmux attach -t xmuggle
