@@ -920,6 +920,7 @@ func runPostTaskCommands(cfg Config, project, taskID string) {
 	postLog := filepath.Join(xmuggleDir, "post-cmd-"+taskID+".log")
 	cmd := exec.Command("bash", "-lc", script)
 	cmd.Dir = rc.Path
+	cmd.Env = gitEnv()
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.Stdin = nil
 	lf, _ := os.Create(postLog)
