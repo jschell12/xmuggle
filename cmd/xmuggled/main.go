@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"log"
 	"net/http"
 	"os"
@@ -337,6 +338,97 @@ func writeTaskMeta(metaFile string, m *taskMeta) error {
 	return os.WriteFile(metaFile, append(data, '\n'), 0644)
 }
 
+// collectPriorTaskContext scans the queue for completed tasks targeting the
+// same project and returns a summary string the AI can use as context.
+// Results are sorted chronologically (oldest first) and capped at 10 entries.
+func collectPriorTaskContext(project, currentTaskID string) string {
+	pendingDir := filepath.Join(queueDir, "pending")
+	entries, err := os.ReadDir(pendingDir)
+	if err != nil {
+		return ""
+	}
+
+	type priorTask struct {
+		id      string
+		message string
+		result  string
+		doneAt  string
+	}
+
+	var prior []priorTask
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		tid := entry.Name()
+		if tid == currentTaskID {
+			continue
+		}
+		metaFile := filepath.Join(pendingDir, tid, "meta.json")
+		m, err := readTaskMeta(metaFile)
+		if err != nil {
+			continue
+		}
+		if m.Project != project {
+			continue
+		}
+		if m.Status != "done" {
+			continue
+		}
+		if m.Message == "" && m.Result == "" {
+			continue
+		}
+		prior = append(prior, priorTask{
+			id:      tid,
+			message: m.Message,
+			result:  m.Result,
+			doneAt:  m.DoneAt,
+		})
+	}
+
+	if len(prior) == 0 {
+		return ""
+	}
+
+	// Sort by doneAt ascending (oldest first); task IDs are timestamp-prefixed
+	// so lexicographic order is a reasonable fallback.
+	sort.Slice(prior, func(i, j int) bool {
+		if prior[i].doneAt != "" && prior[j].doneAt != "" {
+			return prior[i].doneAt < prior[j].doneAt
+		}
+		return prior[i].id < prior[j].id
+	})
+
+	// Cap to most recent 10
+	if len(prior) > 10 {
+		prior = prior[len(prior)-10:]
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## Previous tasks completed for this project\n\n")
+	sb.WriteString("Use the following completed task history as context if it helps solve the current task.\n\n")
+	for _, p := range prior {
+		sb.WriteString(fmt.Sprintf("### Task %s", p.id))
+		if p.doneAt != "" {
+			sb.WriteString(fmt.Sprintf(" (completed %s)", p.doneAt))
+		}
+		sb.WriteString("\n")
+		if p.message != "" {
+			sb.WriteString(fmt.Sprintf("**Request:** %s\n", p.message))
+		}
+		if p.result != "" {
+			// Truncate very long results to avoid blowing up the prompt
+			r := p.result
+			if len(r) > 2000 {
+				r = r[:2000] + "\n... (truncated)"
+			}
+			sb.WriteString(fmt.Sprintf("**Result:** %s\n", r))
+		}
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
 func syncQueue() bool {
 	debug("Syncing queue repo")
 	gitDir := filepath.Join(queueDir, ".git")
@@ -631,6 +723,11 @@ func runWorker(cfg Config, m *taskMeta, taskID, taskDir string) {
 	}
 	if m.Message != "" {
 		promptParts = append(promptParts, m.Message)
+	}
+	// Include prior completed tasks for the same project as context
+	if priorContext := collectPriorTaskContext(m.Project, taskID); priorContext != "" {
+		promptParts = append(promptParts, priorContext)
+		logf("  [%s] Including prior task context for %s", taskID, m.Project)
 	}
 	prompt := strings.Join(promptParts, "\n\n")
 
