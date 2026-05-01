@@ -615,12 +615,12 @@ function render(images) {
       card.appendChild(resultEl);
     }
 
-    // Send button
-    if (!isProcessing && status !== 'done') {
+    // Send button (also shown on done tasks for follow-up)
+    if (!isProcessing) {
       const sendBtn = document.createElement('button');
       sendBtn.className = 'send-btn';
-      sendBtn.textContent = '\u25B6';
-      sendBtn.title = 'Send';
+      sendBtn.textContent = status === 'done' ? '\u21BB' : '\u25B6';
+      sendBtn.title = status === 'done' ? 'Follow up' : 'Send';
       sendBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         promptAndSend(img);
@@ -656,29 +656,37 @@ function promptAndSend(img) {
   const existing = document.getElementById('context-modal');
   if (existing) existing.remove();
 
+  const isFollowUp = img.status === 'done';
   let projectOptions = '';
   for (const p of projects) {
-    const selected = (activeProject === p.path) ? ' selected' : '';
+    const selected = (isFollowUp && img.projectPath === p.path) ? ' selected'
+      : (!isFollowUp && activeProject === p.path) ? ' selected' : '';
     projectOptions += `<option value="${p.path}"${selected}>${p.name}</option>`;
   }
   if (projects.length === 0) {
     projectOptions = '<option value="">No projects \u2014 add one first</option>';
   }
 
+  const modalTitle = isFollowUp ? 'Follow up' : 'Send';
+  const placeholder = isFollowUp
+    ? 'What else needs to be changed or fixed?'
+    : 'What\'s wrong? What should be fixed?';
+  const sendLabel = isFollowUp ? 'Follow up' : 'Send';
+
   const modal = document.createElement('div');
   modal.id = 'context-modal';
   modal.className = 'modal-overlay';
   modal.innerHTML = `
     <div class="modal">
-      <div class="modal-title">Send</div>
+      <div class="modal-title">${modalTitle}</div>
       <div class="modal-subtitle">${img.name}</div>
       <label class="modal-label">Project</label>
       <select id="project-select">${projectOptions}</select>
       <label class="modal-label">Context</label>
-      <textarea id="context-input" placeholder="What's wrong? What should be fixed?" rows="3"></textarea>
+      <textarea id="context-input" placeholder="${placeholder}" rows="3"></textarea>
       <div class="modal-actions">
         <button id="modal-cancel" class="link-btn">Cancel</button>
-        <button id="modal-send" class="modal-send-btn" ${projects.length === 0 ? 'disabled' : ''}>Send</button>
+        <button id="modal-send" class="modal-send-btn" ${projects.length === 0 ? 'disabled' : ''}>${sendLabel}</button>
       </div>
     </div>
   `;
