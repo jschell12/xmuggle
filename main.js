@@ -178,7 +178,8 @@ function scanDir(dir, tasks, { allowText = false } = {}) {
         const projectPath = task ? task.projectPath : '';
         const conversation = task ? (task.conversation || []) : [];
         const result = task ? (task.result || '') : '';
-        const base = { path: full, name, mtime: stat.mtimeMs, status, projectPath, conversation, result };
+        const queueTaskId = task ? (task.queueTaskId || '') : '';
+        const base = { path: full, name, mtime: stat.mtimeMs, status, projectPath, conversation, result, queueTaskId };
         if (isImage) {
           items.push({ ...base, type: 'image' });
         } else {
@@ -271,7 +272,7 @@ function resolveTaskAICli(daemonCfg, projectPath, projectSlug) {
   return repo && repo.aiCli ? repo.aiCli : '';
 }
 
-function queuePush(imagePaths, projectPath, message) {
+function queuePush(imagePaths, projectPath, message, followUpTo) {
   const queueDir = ensureQueueClone();
   if (!queueDir) throw new Error('No queue repo configured. Set it in the relay dropdown.');
 
@@ -308,6 +309,7 @@ function queuePush(imagePaths, projectPath, message) {
     timestamp: new Date().toISOString(),
     status: 'pending',
     aiCli: aiCli || undefined,
+    followUpTo: followUpTo || undefined,
   }, null, 2) + '\n');
 
   execSync('git add -A', { cwd: queueDir, stdio: 'pipe' });
@@ -540,8 +542,8 @@ app.whenReady().then(() => {
   // Queue repo
   ipcMain.handle('get-queue-url', () => getQueueUrl());
   ipcMain.handle('set-queue-url', (_, url) => { setQueueUrl(url); return true; });
-  ipcMain.handle('queue-push', (_, imagePaths, projectPath, message) => {
-    const result = queuePush(imagePaths, projectPath, message);
+  ipcMain.handle('queue-push', (_, imagePaths, projectPath, message, followUpTo) => {
+    const result = queuePush(imagePaths, projectPath, message, followUpTo);
     // Track the queue task ID locally so we can poll for status
     const imgPath = imagePaths[0];
     updateTaskStatus(imgPath, {

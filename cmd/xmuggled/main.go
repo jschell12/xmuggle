@@ -316,6 +316,7 @@ type taskMeta struct {
 	ProcessedBy string   `json:"processedBy,omitempty"`
 	Result      string   `json:"result,omitempty"`
 	DoneAt      string   `json:"doneAt,omitempty"`
+	FollowUpTo  string   `json:"followUpTo,omitempty"`
 }
 
 func readTaskMeta(metaFile string) (*taskMeta, error) {
@@ -426,6 +427,39 @@ func collectPriorTaskContext(project, currentTaskID string) string {
 		}
 		sb.WriteString("\n")
 	}
+	return sb.String()
+}
+
+// collectFollowUpContext reads the parent task's meta.json and returns a
+// prompt section with the original request and result so the AI has full
+// context for the follow-up.
+func collectFollowUpContext(parentTaskID string) string {
+	metaFile := filepath.Join(queueDir, "pending", parentTaskID, "meta.json")
+	m, err := readTaskMeta(metaFile)
+	if err != nil {
+		return ""
+	}
+	if m.Message == "" && m.Result == "" {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## This is a follow-up to a previous task\n\n")
+	sb.WriteString("The user already submitted this task once and it was completed. They are now following up with additional changes. Here is the context from the previous task:\n\n")
+	if m.Message != "" {
+		sb.WriteString(fmt.Sprintf("**Previous request:** %s\n\n", m.Message))
+	}
+	if m.Result != "" {
+		r := m.Result
+		if len(r) > 4000 {
+			r = r[:4000] + "\n... (truncated)"
+		}
+		sb.WriteString(fmt.Sprintf("**Previous result:** %s\n\n", r))
+	}
+	if m.DoneAt != "" {
+		sb.WriteString(fmt.Sprintf("**Completed at:** %s\n\n", m.DoneAt))
+	}
+	sb.WriteString("Use this context to understand what was already done, and focus on the new follow-up request below.\n")
 	return sb.String()
 }
 
@@ -714,6 +748,15 @@ func runWorker(cfg Config, m *taskMeta, taskID, taskDir string) {
 	// Build prompt
 	var promptParts []string
 	promptParts = append(promptParts, "You are a code fix agent. Your job is to read the code in this repo, understand the issue described below, and fix it by editing files directly. Do not ask questions. Do not use xmuggle or any external tools. Just read the code, make the fix, and commit nothing — the caller handles git.")
+
+	// If this is a follow-up task, include the parent task's context prominently
+	if m.FollowUpTo != "" {
+		if parentContext := collectFollowUpContext(m.FollowUpTo); parentContext != "" {
+			promptParts = append(promptParts, parentContext)
+			logf("  [%s] Including follow-up context from parent task %s", taskID, m.FollowUpTo)
+		}
+	}
+
 	if len(imgPaths) > 0 {
 		promptParts = append(promptParts,
 			fmt.Sprintf("Analyze the screenshot(s) at %s and fix any bugs or UI issues you find in this repo.", strings.Join(imgPaths, ", ")))

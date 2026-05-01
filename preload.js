@@ -17,7 +17,7 @@ contextBridge.exposeInMainWorld('xmuggle', {
   sendToRelay: (imagePath, project, message) => ipcRenderer.invoke('send-to-relay', imagePath, project, message),
   getQueueUrl: () => ipcRenderer.invoke('get-queue-url'),
   setQueueUrl: (url) => ipcRenderer.invoke('set-queue-url', url),
-  queuePush: (imagePaths, projectPath, message) => ipcRenderer.invoke('queue-push', imagePaths, projectPath, message),
+  queuePush: (imagePaths, projectPath, message, followUpTo) => ipcRenderer.invoke('queue-push', imagePaths, projectPath, message, followUpTo),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   daemonStatus: () => ipcRenderer.invoke('daemon-status'),
   daemonStart: () => ipcRenderer.invoke('daemon-start'),

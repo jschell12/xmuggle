@@ -737,8 +737,11 @@ async function queuePush(img, projectPath, message) {
   const images = await window.xmuggle.getImages();
   render(images);
 
+  // If this is a follow-up on a done task, pass the previous task ID
+  const followUpTo = (img.status === 'done' && img.queueTaskId) ? img.queueTaskId : '';
+
   try {
-    const result = await window.xmuggle.queuePush([img.path], projectPath, message || '');
+    const result = await window.xmuggle.queuePush([img.path], projectPath, message || '', followUpTo);
     processingSet.delete(img.path);
     showToast('Queued for ' + (result.project || projectPath.split('/').pop()), false);
   } catch (err) {
