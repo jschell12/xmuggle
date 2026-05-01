@@ -31,10 +31,15 @@ function hasGhToken() {
 function gitEnv() {
   const token = getGhToken();
   if (!token) return process.env;
+
+  // Create a tiny script that prints the token when git asks for a password.
+  // GIT_ASKPASS is invoked with a prompt argument; we ignore it and just print the token.
+  const askpass = path.join(os.tmpdir(), 'xmuggle-askpass.sh');
+  fs.writeFileSync(askpass, `#!/bin/sh\nexec echo '${token.replace(/'/g, "'\\''")}'\n`, { mode: 0o700 });
+
   return {
     ...process.env,
-    GH_TOKEN: token,
-    GIT_ASKPASS: 'echo',
+    GIT_ASKPASS: askpass,
     GIT_TERMINAL_PROMPT: '0',
   };
 }
