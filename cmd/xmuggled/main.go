@@ -489,6 +489,11 @@ func queueCommitPushSafe(message string) {
 	debug("Queue commit+push: %s", message)
 	queueMu.Lock()
 	defer queueMu.Unlock()
+	queueCommitPushLocked(message)
+}
+
+// queueCommitPushLocked performs add+commit+push. Caller must hold queueMu.
+func queueCommitPushLocked(message string) {
 	runGit(queueDir, "add", "-A")
 	if _, err := runGit(queueDir, "commit", "-m", message); err == nil {
 		debug("Queue commit ok, fetching before push")
@@ -504,6 +509,17 @@ func queueCommitPushSafe(message string) {
 	} else {
 		trace("Queue commit skipped (nothing to commit): %s", message)
 	}
+}
+
+// queueWriteAndPush atomically writes a task meta file and commits+pushes,
+// holding queueMu for the entire operation to prevent syncQueue from
+// resetting the file between write and commit.
+func queueWriteAndPush(metaFile string, m *taskMeta, message string) {
+	debug("Queue write+commit+push: %s", message)
+	queueMu.Lock()
+	defer queueMu.Unlock()
+	writeTaskMeta(metaFile, m)
+	queueCommitPushLocked(message)
 }
 
 // ── Queue processing ──
@@ -648,8 +664,7 @@ func processQueue(cfg Config) {
 		// Mark as processing in xmuggle-queue
 		m.Status = "processing"
 		m.ProcessedBy = host
-		writeTaskMeta(metaFile, m)
-		queueCommitPushSafe(fmt.Sprintf("processing: %s", taskID))
+		queueWriteAndPush(metaFile, m, fmt.Sprintf("processing: %s", taskID))
 
 		logf("Dispatching task %s for %s (workers: %d/%d)",
 			taskID, m.Project, workerCount.Load()+1, cfg.MaxWorkers)
@@ -875,8 +890,7 @@ func runWorker(cfg Config, m *taskMeta, taskID, taskDir string) {
 			logf("  [%s] Claude killed by SIGTERM, requeueing task", taskID)
 			m.Status = "pending"
 			m.ProcessedBy = ""
-			writeTaskMeta(metaFile, m)
-			queueCommitPushSafe(fmt.Sprintf("requeue (SIGTERM): %s", taskID))
+			queueWriteAndPush(metaFile, m, fmt.Sprintf("requeue (SIGTERM): %s", taskID))
 			return
 		}
 		logf("  [%s] %s failed: %v", taskID, aiCli, claudeErr)
@@ -1100,8 +1114,7 @@ func markDone(m *taskMeta, metaFile, taskID, result string) {
 	m.Status = "done"
 	m.Result = result
 	m.DoneAt = time.Now().Format(time.RFC3339)
-	writeTaskMeta(metaFile, m)
-	queueCommitPushSafe(fmt.Sprintf("done: %s", taskID))
+	queueWriteAndPush(metaFile, m, fmt.Sprintf("done: %s", taskID))
 	logf("  [%s] Task complete", taskID)
 }
 
@@ -1109,8 +1122,7 @@ func markError(m *taskMeta, metaFile, taskID, reason string) {
 	m.Status = "error"
 	m.Result = reason
 	m.DoneAt = time.Now().Format(time.RFC3339)
-	writeTaskMeta(metaFile, m)
-	queueCommitPushSafe(fmt.Sprintf("error: %s", taskID))
+	queueWriteAndPush(metaFile, m, fmt.Sprintf("error: %s", taskID))
 	logf("  [%s] Task failed: %s", taskID, reason)
 }
 
