@@ -246,10 +246,12 @@ function ensureQueueClone() {
 }
 
 function getProjectSlug(projectPath) {
-  // Get "user/repo" from git remote, fall back to dir name
+  const configured = loadProjects().find(p => p.path === path.resolve(projectPath));
+  if (configured?.gitUrl) return configured.gitUrl;
+  // Preserve the host and nested groups for GitLab and other Git servers.
   try {
     const remote = execSync('git remote get-url origin', { cwd: projectPath, encoding: 'utf8', stdio: 'pipe' }).trim();
-    return remote.replace(/^https:\/\/github\.com\//, '').replace(/^git@github\.com:/, '').replace(/\.git$/, '');
+    return remote;
   } catch {
     return path.basename(projectPath);
   }
@@ -259,7 +261,7 @@ function resolveTaskAICli(daemonCfg, projectPath, projectSlug) {
   const repos = Array.isArray(daemonCfg?.repos) ? daemonCfg.repos : [];
   const normalizedPath = path.resolve(projectPath);
   const projectName = path.basename(normalizedPath);
-  const slugName = path.basename(projectSlug || '');
+  const slugName = path.basename(projectSlug || '').replace(/\.git$/, '');
   const repo = repos.find((r) => {
     if (!r || !r.path) return false;
     const repoPath = path.resolve(r.path);
@@ -455,11 +457,6 @@ app.whenReady().then(() => {
     removeProject(dirPath);
     return listProjects();
   });
-
-  // GitHub token
-  ipcMain.handle('has-gh-token', () => api.hasGhToken());
-  ipcMain.handle('set-gh-token', (_, token) => { api.setGhToken(token); return true; });
-  ipcMain.handle('reset-gh-token', () => { api.resetGhToken(); return true; });
 
   ipcMain.handle('open-external', (_, url) => shell.openExternal(url));
 

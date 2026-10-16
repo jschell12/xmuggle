@@ -1,6 +1,6 @@
 # xmuggle
 
-Screenshot-driven code fixes. Take a screenshot, and a Claude agent analyzes the image, finds the relevant code, and fixes it.
+Code changes from text prompts or screenshots, with GitHub and GitLab repositories. Describe a feature or fix, optionally attach screenshots, and an AI agent edits the code.
 
 Electron UI for managing screenshots and projects. Go daemon (`xmuggled`) for git sync and background tasks.
 
@@ -83,3 +83,23 @@ tail -f ~/.xmuggle/logs/daemon.stderr.log        # launchd stderr
 - Go 1.22+ (to build daemon)
 - Node.js + npm (for Electron UI)
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)
+
+## GitLab and text prompts
+
+Add a local checkout with its GitLab origin (SSH or HTTPS, including nested groups
+and self-hosted GitLab). You can override the Git URL when adding a project.
+The queue repository can also be hosted on GitLab.
+
+Click **+ Prompt**, select a project, describe the requested change, and click
+**Queue prompt** (or Cmd/Ctrl+Enter). No image is required. Text prompts remain
+visible in the grid with task status and results. Screenshot submissions still work.
+The processing daemon runs on another machine, as with screenshot tasks.
+
+GitLab tasks clone an isolated branch, push changes, and open a merge request
+against the project's default branch using `glab`. Review and merge it in GitLab.
+Install and authenticate the GitLab CLI on the processing machine, including the
+appropriate host for self-hosted GitLab. GitHub tasks retain their existing flow.
+
+Use SSH keys or Git credential helpers for Git authentication. For environment
+credentials, launch the UI and daemon through `scredmgr run --path <project> --
+<command>`. Tokens are no longer stored or read from `~/.xmuggle/gh-token`.

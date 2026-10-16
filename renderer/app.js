@@ -163,7 +163,7 @@ addProjectBtn.addEventListener('click', () => {
       <div class="modal-title">Add Project</div>
       <div class="settings-field">
         <label>Git URL</label>
-        <input type="text" id="add-project-git-url" placeholder="git@github.com:user/repo.git (auto-detected if blank)">
+        <input type="text" id="add-project-git-url" placeholder="git@gitlab.com:group/repo.git (auto-detected if blank)">
         <div class="settings-hint">Leave blank to auto-detect from the selected directory</div>
       </div>
       <div class="settings-field">
@@ -240,14 +240,14 @@ addNoteBtn.addEventListener('click', () => {
   modal.className = 'modal-overlay';
   modal.innerHTML = `
     <div class="modal">
-      <div class="modal-title">Paste text</div>
-      <div class="modal-subtitle">Saved as a text note you can send like a screenshot</div>
+      <div class="modal-title">New text prompt</div>
+      <div class="modal-subtitle">Describe the change to make. No screenshot required.</div>
       <label class="modal-label">Project</label>
       <select id="note-project-select">${projectOptions}</select>
-      <textarea id="note-text-input" placeholder="Paste error message, stack trace, log, etc\u2026" rows="10"></textarea>
+      <textarea id="note-text-input" placeholder="Describe a feature, fix, or paste an error message\u2026" rows="10"></textarea>
       <div class="modal-actions">
         <button id="note-cancel" class="link-btn">Cancel</button>
-        <button id="note-save" class="modal-send-btn">Save</button>
+        <button id="note-save" class="modal-send-btn">Queue prompt</button>
       </div>
     </div>
   `;
@@ -287,7 +287,7 @@ settingsBtn.addEventListener('click', async () => {
   if (existing) { existing.remove(); return; }
 
   const queueUrl = await window.xmuggle.getQueueUrl();
-  const hasToken = await window.xmuggle.hasGhToken();
+
   const daemon = await window.xmuggle.daemonStatus();
   const daemonCfg = await window.xmuggle.getDaemonConfig();
   const repos = (daemonCfg.repos || []).filter(r => r.path);
@@ -310,13 +310,12 @@ settingsBtn.addEventListener('click', async () => {
       </div>
       <div class="settings-field">
         <label>Queue Repo URL</label>
-        <input type="text" id="settings-queue-url" placeholder="git@github.com:user/xmuggle-queue.git">
+        <input type="text" id="settings-queue-url" placeholder="git@gitlab.com:group/xmuggle-queue.git">
         <div class="settings-hint">Git repo for syncing screenshots between machines</div>
       </div>
       <div class="settings-field">
-        <label>GitHub Token ${hasToken ? '(set)' : '(not set)'}</label>
-        <input type="password" id="settings-gh-token" value="" placeholder="${hasToken ? 'Leave blank to keep current' : 'ghp_...'}">
-        <div class="settings-hint">Used for git push auth. Leave blank to keep current value.</div>
+        <label>Git authentication</label>
+        <div class="settings-hint">Use SSH or Git credential helpers. Launch with scredmgr for credentials; GitLab merge requests use glab.</div>
       </div>
       <div class="settings-field">
         <label>Repos &amp; Post Commands</label>
@@ -333,7 +332,6 @@ settingsBtn.addEventListener('click', async () => {
       </div>
       <div class="modal-actions">
         <button id="settings-cancel" class="link-btn">Cancel</button>
-        ${hasToken ? '<button id="settings-reset-token" class="link-btn" style="color:#d63031;">Reset Token</button>' : ''}
         <button id="settings-save" class="modal-send-btn">Save</button>
       </div>
     </div>
@@ -434,25 +432,13 @@ settingsBtn.addEventListener('click', async () => {
     });
   });
 
-  const resetBtn = document.getElementById('settings-reset-token');
-  if (resetBtn) {
-    resetBtn.addEventListener('click', async () => {
-      await window.xmuggle.resetGhToken();
-      modal.remove();
-      showToast('GitHub token cleared', false);
-    });
-  }
-
   document.getElementById('settings-save').addEventListener('click', async () => {
     const newQueue = document.getElementById('settings-queue-url').value.trim();
-    const newToken = document.getElementById('settings-gh-token').value.trim();
 
     if (newQueue !== (queueUrl || '')) {
       await window.xmuggle.setQueueUrl(newQueue);
     }
-    if (newToken) {
-      await window.xmuggle.setGhToken(newToken);
-    }
+
 
     // Save AI CLI + repos config + queue URL into daemon config
     daemonCfg.aiCli = document.getElementById('settings-ai-cli').value;
