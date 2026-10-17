@@ -103,3 +103,17 @@ appropriate host for self-hosted GitLab. GitHub tasks retain their existing flow
 Use SSH keys or Git credential helpers for Git authentication. For environment
 credentials, launch the UI and daemon through `scredmgr run --path <project> --
 <command>`. Tokens are no longer stored or read from `~/.xmuggle/gh-token`.
+
+## Response inbox
+
+Open **Responses** to see completed and failed submissions, including the worker's
+result and merge-request link. The badge counts unread responses; opening a
+response marks it read. The inbox is stored locally in `~/.xmuggle/responses.json`
+and survives restarts and deletion of original attachments.
+
+While xmuggle is running, it checks the shared queue every 10 seconds and after
+wake. Newly collected responses trigger an in-app alert and an OS notification
+when supported and permitted by system settings. Clicking the notification opens
+the inbox. Tasks completed while the app was closed appear on the next sync.
+Only tasks submitted by this machine's hostname are collected. Existing completed
+tasks are imported on the first sync; subsequent syncs do not repeat their alerts.

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, dialog, powerMonitor } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, powerMonitor, Notification } = require('electron');
 const http = require('http');
 const { execSync, exec } = require('child_process');
 const path = require('path');
@@ -8,6 +8,8 @@ const os = require('os');
 const DESKTOP = path.join(os.homedir(), 'Desktop');
 const XMUGGLE_DIR = path.join(os.homedir(), '.xmuggle');
 const PROJECTS_FILE = path.join(XMUGGLE_DIR, 'projects.json');
+const RESPONSES_FILE = path.join(XMUGGLE_DIR, 'responses.json');
+const { collectResponses } = require('./responses');
 const TASKS_FILE = path.join(XMUGGLE_DIR, 'tasks.json');
 const INBOX_DIR = path.join(XMUGGLE_DIR, 'inbox');
 const NOTES_DIR = path.join(XMUGGLE_DIR, 'notes');
@@ -88,6 +90,53 @@ function updateTaskStatus(imagePath, updates) {
   saveTasks(tasks);
 }
 
+function loadResponses() {
+  try { return JSON.parse(fs.readFileSync(RESPONSES_FILE, 'utf8')); }
+  catch (err) { if (err.code === 'ENOENT') return {}; throw err; }
+}
+
+function saveResponses(responses) {
+  fs.mkdirSync(XMUGGLE_DIR, { recursive: true });
+  fs.writeFileSync(RESPONSES_FILE + '.tmp', JSON.stringify(responses, null, 2) + '\n');
+  fs.renameSync(RESPONSES_FILE + '.tmp', RESPONSES_FILE);
+}
+
+function syncResponses() {
+  const pending = path.join(QUEUE_REPO_DIR, 'pending');
+  let entries;
+  try { entries = fs.readdirSync(pending, { withFileTypes: true }); }
+  catch (err) { if (err.code === 'ENOENT') return; throw err; }
+  const tasks = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    try {
+      const meta = JSON.parse(fs.readFileSync(path.join(pending, entry.name, 'meta.json'), 'utf8'));
+      tasks.push({ ...meta, id: entry.name });
+    } catch {} // A concurrent pull can temporarily remove a metadata file.
+  }
+  const { responses, added } = collectResponses(loadResponses(), tasks, os.hostname());
+  if (!added.length) return;
+  saveResponses(responses);
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send('responses-updated');
+  }
+  if (Notification.isSupported()) {
+    const notification = new Notification({
+      title: 'xmuggle: ' + added.length + ' new response(s)',
+      body: added.map(r => `${r.project}: ${r.status === 'error' ? 'Failed' : 'Processed'}`).join('\n'),
+    });
+    notification.on('click', () => {
+      const win = BrowserWindow.getAllWindows()[0];
+      if (!win) return;
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+      win.webContents.send('open-responses');
+    });
+    notification.show();
+  }
+}
+
 // Sync task statuses from queue repo
 function syncTaskStatuses() {
   const tasks = loadTasks();
@@ -146,6 +195,7 @@ function syncTaskStatuses() {
   }
 
   if (changed) saveTasks(tasks);
+  syncResponses();
   return tasks;
 }
 
@@ -433,6 +483,13 @@ app.whenReady().then(() => {
   }
   const api = require('./api');
 
+  ipcMain.handle('get-responses', () => Object.values(loadResponses()).sort((a, b) => b.doneAt.localeCompare(a.doneAt)));
+  ipcMain.handle('read-response', (_, id) => {
+    const responses = loadResponses();
+    if (responses[id]) responses[id].read = true;
+    saveResponses(responses);
+    return true;
+  });
   ipcMain.handle('get-images', () => getDesktopImages());
   ipcMain.handle('delete-image', (_, imgPath) => {
     try { fs.unlinkSync(imgPath); } catch {}

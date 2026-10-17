@@ -1,6 +1,10 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('xmuggle', {
+  getResponses: () => ipcRenderer.invoke('get-responses'),
+  readResponse: (id) => ipcRenderer.invoke('read-response', id),
+  onResponsesUpdated: (callback) => ipcRenderer.on('responses-updated', () => callback()),
+  onOpenResponses: (callback) => ipcRenderer.on('open-responses', () => callback()),
   getImages: () => ipcRenderer.invoke('get-images'),
   deleteImage: (imgPath) => ipcRenderer.invoke('delete-image', imgPath),
   listProjects: () => ipcRenderer.invoke('list-projects'),

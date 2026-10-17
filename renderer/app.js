@@ -856,3 +856,54 @@ loadProjects();
 refresh();
 updateDaemonStatus();
 setInterval(updateDaemonStatus, 10_000);
+
+// Responses remain available even when the original attachment is removed.
+const responsesBtn = document.getElementById('responses-btn');
+async function refreshResponseCount() {
+  const responses = await window.xmuggle.getResponses();
+  const unread = responses.filter(r => !r.read).length;
+  responsesBtn.textContent = unread ? `Responses (${unread} unread)` : 'Responses';
+  return responses;
+}
+
+async function showResponses() {
+  document.getElementById('responses-modal')?.remove();
+  const responses = await refreshResponseCount();
+  const modal = document.createElement('div');
+  modal.id = 'responses-modal';
+  modal.className = 'modal-overlay';
+  modal.innerHTML = `<div class="modal response-inbox">
+    <div class="modal-title">Responses</div>
+    <div class="response-list"></div>
+    <div class="modal-actions"><button class="link-btn response-close">Close</button></div>
+  </div>`;
+  const list = modal.querySelector('.response-list');
+  if (!responses.length) list.textContent = 'Completed prompts and failures will appear here.';
+  for (const response of responses) {
+    const row = document.createElement('button');
+    row.className = 'response-row' + (response.read ? '' : ' response-unread');
+    const title = document.createElement('strong');
+    title.textContent = `${response.read ? '' : 'Unread · '}${response.status === 'error' ? 'Failed' : 'Processed'} · ${response.project}`;
+    const detail = document.createElement('span');
+    detail.textContent = `${response.message || response.name} · ${new Date(response.doneAt).toLocaleString()}`;
+    row.append(title, detail);
+    row.addEventListener('click', async () => {
+      await window.xmuggle.readResponse(response.id);
+      await refreshResponseCount();
+      modal.remove();
+      showResultModal({ name: response.message || response.name, projectPath: response.project, result: response.result });
+    });
+    list.appendChild(row);
+  }
+  modal.querySelector('.response-close').addEventListener('click', () => modal.remove());
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  document.body.appendChild(modal);
+}
+responsesBtn.addEventListener('click', showResponses);
+window.xmuggle.onOpenResponses(showResponses);
+window.xmuggle.onResponsesUpdated(() => {
+  refreshResponseCount();
+  showToast('New task response received', false);
+  if (document.getElementById('responses-modal')) showResponses();
+});
+refreshResponseCount();
