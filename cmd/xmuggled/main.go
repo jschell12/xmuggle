@@ -4,13 +4,14 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -48,7 +49,7 @@ var postCmdProcs = struct {
 type RepoConfig struct {
 	Path         string   `json:"path"`
 	PostCommands []string `json:"postCommands,omitempty"`
-	AICli        string   `json:"aiCli,omitempty"`        // per-repo override: "claude" or "cursor"
+	AICli        string   `json:"aiCli,omitempty"` // per-repo override: "claude" or "cursor"
 }
 
 type Config struct {
@@ -212,40 +213,17 @@ func logAt(level int, format string, args ...any) {
 	fmt.Println(msg)
 }
 
-func trace(format string, args ...any) { logAt(LevelTrace, format, args...) }
-func debug(format string, args ...any) { logAt(LevelDebug, format, args...) }
-func logf(format string, args ...any)  { logAt(LevelInfo, format, args...) }
-func warn(format string, args ...any)  { logAt(LevelWarn, format, args...) }
+func trace(format string, args ...any)  { logAt(LevelTrace, format, args...) }
+func debug(format string, args ...any)  { logAt(LevelDebug, format, args...) }
+func logf(format string, args ...any)   { logAt(LevelInfo, format, args...) }
+func warn(format string, args ...any)   { logAt(LevelWarn, format, args...) }
 func errorf(format string, args ...any) { logAt(LevelError, format, args...) }
 
 // ── Git ──
 
 func gitEnv() []string {
-	env := os.Environ()
-	tokenFile := filepath.Join(xmuggleDir, "gh-token")
-	token := os.Getenv("GH_TOKEN")
-	source := "env:GH_TOKEN"
-	if token == "" {
-		token = os.Getenv("GITHUB_TOKEN")
-		source = "env:GITHUB_TOKEN"
-	}
-	if token == "" {
-		if data, err := os.ReadFile(tokenFile); err == nil {
-			token = strings.TrimSpace(string(data))
-			source = "file:" + tokenFile
-		}
-	}
-	if token != "" {
-		trace("Git token found via %s (len=%d)", source, len(token))
-		env = append(env,
-			"GH_TOKEN="+token,
-			"GIT_ASKPASS=echo",
-			"GIT_TERMINAL_PROMPT=0",
-		)
-	} else {
-		trace("No git token found")
-	}
-	return env
+	// Inherit credentials injected by scredmgr or configured Git credential helpers.
+	return os.Environ()
 }
 
 func runGit(dir string, args ...string) (string, error) {
@@ -297,10 +275,28 @@ func cleanupStaleGitIndexLock(dir string) bool {
 }
 
 func projectToURL(project string) string {
-	if strings.HasPrefix(project, "git@") || strings.HasPrefix(project, "http") {
+	if strings.HasPrefix(project, "git@") || strings.HasPrefix(project, "https://") || strings.HasPrefix(project, "http://") || strings.HasPrefix(project, "ssh://") {
 		return project
 	}
 	return fmt.Sprintf("git@github.com:%s.git", project)
+}
+
+// repositoryName handles HTTPS, SSH URLs and scp-style remotes with nested groups.
+func repositoryName(remote string) string {
+	if u, err := url.Parse(remote); err == nil && u.Host != "" {
+		remote = u.Path
+	}
+	return strings.TrimSuffix(filepath.Base(remote), ".git")
+}
+
+func isGitLab(remote string) bool {
+	// GitHub keeps its existing flow; other hosts use the GitLab CLI, including self-hosted GitLab.
+	return !strings.Contains(remote, "github.com:") && !strings.Contains(remote, "github.com/")
+}
+
+func mergeRequestCommand(title, body, branch string) *exec.Cmd {
+	return exec.Command("glab", "mr", "create", "--title", title, "--description", body,
+		"--source-branch", branch, "--fill", "--push=false", "--yes")
 }
 
 // ── Queue message schema ──
@@ -689,7 +685,7 @@ func runWorker(cfg Config, m *taskMeta, taskID, taskDir string) {
 	}()
 
 	metaFile := filepath.Join(taskDir, "meta.json")
-	projectName := filepath.Base(m.Project)
+	projectName := repositoryName(m.Project)
 	remoteURL := projectToURL(m.Project)
 	aqScript := filepath.Join(cfg.AQScriptsDir, "agent-queue")
 	amScript := filepath.Join(cfg.AQScriptsDir, "agent-merge")
@@ -706,6 +702,9 @@ func runWorker(cfg Config, m *taskMeta, taskID, taskDir string) {
 
 	logf("  [%s] Cloning %s", taskID, m.Project)
 	cloneCmd := exec.Command("python3", aqScript, "clone", remoteURL, sessionID, "--parent", workDir)
+	if isGitLab(remoteURL) {
+		cloneCmd = exec.Command("git", "clone", remoteURL, filepath.Join(workDir, sessionID))
+	}
 	cloneCmd.Env = gitEnv()
 	cloneOut, cloneErr := cloneCmd.CombinedOutput()
 	if cloneErr != nil {
@@ -726,6 +725,15 @@ func runWorker(cfg Config, m *taskMeta, taskID, taskDir string) {
 	}
 	cloneDir := cloneResult.CloneDir
 	branch := cloneResult.Branch
+
+	if isGitLab(remoteURL) {
+		cloneDir = filepath.Join(workDir, sessionID)
+		branch = sessionID
+		if out, err := runGit(cloneDir, "checkout", "-b", branch); err != nil {
+			markError(m, metaFile, taskID, "Branch creation failed: "+out)
+			return
+		}
+	}
 
 	defer os.RemoveAll(cloneDir)
 
@@ -777,7 +785,7 @@ func runWorker(cfg Config, m *taskMeta, taskID, taskDir string) {
 			fmt.Sprintf("Analyze the screenshot(s) at %s and fix any bugs or UI issues you find in this repo.", strings.Join(imgPaths, ", ")))
 	}
 	if len(textContent) > 0 {
-		promptParts = append(promptParts, "Here is additional context:\n\n"+strings.Join(textContent, "\n\n"))
+		promptParts = append(promptParts, "Implement the following text request:\n\n"+strings.Join(textContent, "\n\n"))
 	}
 	if m.Message != "" {
 		promptParts = append(promptParts, m.Message)
@@ -909,9 +917,32 @@ func runWorker(cfg Config, m *taskMeta, taskID, taskDir string) {
 	}
 
 	// Commit changes
-	runGit(cloneDir, "add", "-A")
+	if out, err := runGit(cloneDir, "add", "-A"); err != nil {
+		markError(m, metaFile, taskID, "Staging failed: "+out)
+		return
+	}
 	commitMsg := fmt.Sprintf("xmuggle: fix from task %s", taskID)
-	runGit(cloneDir, "commit", "-m", commitMsg)
+	if out, err := runGit(cloneDir, "commit", "-m", commitMsg); err != nil {
+		markError(m, metaFile, taskID, "Commit failed: "+out)
+		return
+	}
+
+	if isGitLab(remoteURL) {
+		if out, err := runGit(cloneDir, "push", "-u", "origin", branch); err != nil {
+			markError(m, metaFile, taskID, "Push failed: "+out)
+			return
+		}
+		cmd := mergeRequestCommand(commitMsg, fmt.Sprintf("Automated change from xmuggle task %s\n\n%s", taskID, m.Message), branch)
+		cmd.Dir = cloneDir
+		cmd.Env = gitEnv()
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			markError(m, metaFile, taskID, "Merge request creation failed: "+strings.TrimSpace(string(out)))
+			return
+		}
+		markDone(m, metaFile, taskID, result+"\n\nMerge request: "+strings.TrimSpace(string(out)))
+		return
+	}
 
 	// Merge via agent-merge (serialized per-project lock)
 	logf("  [%s] Merging via agent-merge", taskID)
@@ -958,7 +989,7 @@ func runWorker(cfg Config, m *taskMeta, taskID, taskDir string) {
 // findRepoConfig matches a task's project (e.g. "jschell12/ai-enhance") to a
 // configured repo by checking if the repo path ends with the project name.
 func findRepoConfig(cfg Config, project string) *RepoConfig {
-	projectName := filepath.Base(project)
+	projectName := repositoryName(project)
 	for i := range cfg.Repos {
 		if filepath.Base(cfg.Repos[i].Path) == projectName {
 			return &cfg.Repos[i]

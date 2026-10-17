@@ -1,14 +1,15 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('xmuggle', {
+  getResponses: () => ipcRenderer.invoke('get-responses'),
+  readResponse: (id) => ipcRenderer.invoke('read-response', id),
+  onResponsesUpdated: (callback) => ipcRenderer.on('responses-updated', () => callback()),
+  onOpenResponses: (callback) => ipcRenderer.on('open-responses', () => callback()),
   getImages: () => ipcRenderer.invoke('get-images'),
   deleteImage: (imgPath) => ipcRenderer.invoke('delete-image', imgPath),
   listProjects: () => ipcRenderer.invoke('list-projects'),
   addProject: (gitUrl, dirPath) => ipcRenderer.invoke('add-project', gitUrl, dirPath),
   removeProject: (path) => ipcRenderer.invoke('remove-project', path),
-  hasGhToken: () => ipcRenderer.invoke('has-gh-token'),
-  setGhToken: (token) => ipcRenderer.invoke('set-gh-token', token),
-  resetGhToken: () => ipcRenderer.invoke('reset-gh-token'),
   saveItem: (imagePath, projectPath, message) => ipcRenderer.invoke('save-item', imagePath, projectPath, message),
   createNote: (text) => ipcRenderer.invoke('create-note', text),
   getRelayHost: () => ipcRenderer.invoke('get-relay-host'),

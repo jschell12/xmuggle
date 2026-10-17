@@ -817,3 +817,11 @@ header h1 {
   0%, 100% { border-color: #0984e3; }
   50% { border-color: #0f3460; }
 }
+
+.response-inbox { max-width: 700px; }
+.response-list { max-height: 60vh; overflow-y: auto; }
+.response-row { display: block; width: 100%; text-align: left; padding: 12px;
+  margin: 8px 0; background: #1a1a2e; color: #e0e0e0; border: 1px solid #0f3460;
+  border-radius: 6px; cursor: pointer; }
+.response-row span { display: block; margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.response-unread { border-color: #74b9ff; }
